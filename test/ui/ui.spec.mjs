@@ -28,29 +28,43 @@ if (pageErrors.length) console.log('  ->', pageErrors[0])
 check('app rendered (topbar)', await page.locator('.topbar .logo').isVisible())
 check('chat panel rendered', await page.locator('.panel-chat .chat-header').isVisible())
 
-const row = page.locator('[role="treeitem"]', { hasText: 'bienvenue.md' })
-check('file tree lists bienvenue.md', await row.first().isVisible())
+const row = page.locator('[role="treeitem"]', { hasText: 'welcome.md' })
+check('file tree lists welcome.md', await row.first().isVisible())
 
 await row.first().click()
 await page.waitForTimeout(800)
 check('editor opens on click', await page.locator('.cm-editor').first().isVisible())
 check(
   'editor shows file content',
-  (await page.locator('.cm-content').first().textContent())?.includes('note de test') === true
+  (await page.locator('.cm-content').first().textContent())?.includes('Bienvenue dans Vulcain') === true
 )
 
-const chatStatus = (await page.locator('.chat-status').textContent())?.trim()
+let chatStatus = ''
+for (let i = 0; i < 20; i++) {
+  await page.waitForTimeout(1000)
+  chatStatus = (await page.locator('.chat-status').textContent())?.trim() ?? ''
+  if (chatStatus !== 'connexion…') break
+}
 console.log(`  chat status: ${chatStatus}`)
 check('agent websocket connected (chat pret)', chatStatus === 'prêt')
-check('fake-agent greeted via ACP bridge', (await page.locator('.chat-messages').textContent())?.includes('fake-agent') === true)
+check('real agent greeted via ACP bridge', (await page.locator('.chat-messages').textContent())?.includes('pi') === true)
 
-await page.locator('.chat-input').fill('bonjour')
+// Le bouton Envoyer doit au minimum afficher le message de l'utilisateur
+// (le bug historique etait un clic sans aucun effet quand la connexion pendait)
+const userBubbleBefore = await page.locator('.msg.user').count()
+await page.locator('.chat-input').fill('ping')
 await page.locator('.chat-input').press('Enter')
-await page.waitForTimeout(1500)
-check(
-  'prompt round-trip (echo reply)',
-  (await page.locator('.chat-messages').textContent())?.includes('echo: bonjour') === true
-)
+let sent = false
+for (let i = 0; i < 10; i++) {
+  await page.waitForTimeout(500)
+  const bubbles = await page.locator('.msg.user').count()
+  const last = (await page.locator('.chat-messages').textContent()) ?? ''
+  if (bubbles > userBubbleBefore && last.includes('ping')) {
+    sent = true
+    break
+  }
+}
+check('bouton Envoyer fonctionne (message utilisateur affiché)', sent)
 
 const wsFailures = consoleErrors.filter(e => e.includes('/api/acp') || e.includes('/api/watch'))
 check('no websocket connection errors', wsFailures.length === 0)

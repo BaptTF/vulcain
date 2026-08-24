@@ -26,14 +26,18 @@ export function registerAcpBridge(app: FastifyInstance): void {
       return
     }
 
-    child.on('error', err => {
+    child.on('error', (err: NodeJS.ErrnoException) => {
+      const msg =
+        err.code === 'ENOENT'
+          ? `agent introuvable : "${command[0]}" (installe-le ou change agent.command dans config.json)`
+          : `agent process error: ${err.message}`
       try {
         sock.send(JSON.stringify({
           jsonrpc: '2.0',
           id: -1,
-          error: { code: -32000, message: `agent process error: ${err.message}` }
+          error: { code: -32000, message: msg }
         }))
-        sock.close(1011, 'agent process error')
+        sock.close(1011, msg)
       } catch {}
     })
 

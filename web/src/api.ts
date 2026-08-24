@@ -44,6 +44,10 @@ export function fileUrl(ws: string, path: string): string {
   return `/api/fs/file?ws=${encodeURIComponent(ws)}&path=${encodeURIComponent(path)}`
 }
 
+export function downloadUrl(ws: string, path: string): string {
+  return `/api/fs/download?ws=${encodeURIComponent(ws)}&path=${encodeURIComponent(path)}`
+}
+
 export async function readFile(ws: string, path: string): Promise<string> {
   const r = await fetch(fileUrl(ws, path))
   if (!r.ok) throw new Error(`read failed ${r.status}`)
@@ -77,4 +81,27 @@ export function rename(ws: string, from: string, to: string): Promise<void> {
 
 export function remove(ws: string, path: string): Promise<void> {
   return req('/api/fs/delete', { method: 'DELETE', body: JSON.stringify({ ws, path }) })
+}
+
+export interface BrowseEntry {
+  name: string
+  type: 'dir'
+}
+
+export interface BrowseResult {
+  root: string
+  path: string
+  entries: BrowseEntry[]
+}
+
+export function browse(path: string): Promise<BrowseResult> {
+  return req(`/api/fs/browse?path=${encodeURIComponent(path)}`)
+}
+
+export function addWorkspace(name: string, path: string): Promise<void> {
+  return req('/api/workspaces', { method: 'POST', body: JSON.stringify({ name, path }) })
+}
+
+export function removeWorkspace(name: string): Promise<void> {
+  return req(`/api/workspaces/${encodeURIComponent(name)}`, { method: 'DELETE' })
 }

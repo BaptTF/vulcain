@@ -1,13 +1,16 @@
 import fs from 'node:fs'
+import os from 'node:os'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
 import type { FastifyInstance } from 'fastify'
 import {
   allWorkspaces,
+  expandHome,
   findWorkspace,
   loadConfig,
   resolveInWorkspace,
-  saveConfig
+  saveConfig,
+  vulcainHome
 } from './config.js'
 
 const BINARY_EXT = new Set([
@@ -23,6 +26,33 @@ function workspace(name: string | undefined) {
   const ws = findWorkspace(cfg, name ?? '')
   if (!ws) throw new Error(`unknown workspace: ${name}`)
   return ws
+}
+
+function browseRoot(): string {
+  const raw = process.env.VULCAIN_WORKSPACES || path.join(vulcainHome(), 'workspaces')
+  return path.resolve(expandHome(raw))
+}
+
+function resolveBrowse(rel: string): { root: string; abs: string } {
+  const root = browseRoot()
+  const abs = path.resolve(root, rel ?? '')
+  if (abs !== root && !abs.startsWith(root + path.sep)) {
+    throw new Error('path escapes browse root')
+  }
+  return { root, abs }
+}
+
+async function listDirs(abs: string): Promise<{ name: string; type: 'dir' }[]> {
+  let entries: fs.Dirent[]
+  try {
+    entries = await fsp.readdir(abs, { withFileTypes: true })
+  } catch {
+    return []
+  }
+  return entries
+    .filter(e => e.isDirectory() && e.name !== '.' && e.name !== '..')
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .map(e => ({ name: e.name, type: 'dir' as const }))
 }
 
 interface TreeEntry {
@@ -96,6 +126,61 @@ export function registerFsApi(app: FastifyInstance): void {
       return reply.send(data)
     }
     return { content: await fsp.readFile(abs, 'utf8') }
+  })
+
+  app.get('/api/fs/download', async (req, reply) => {
+    const q = req.query as { ws?: string; path?: string }
+    const ws = workspace(q.ws)
+    const abs = resolveInWorkspace(ws, q.path ?? '')
+    const st = await fsp.stat(abs)
+    if (!st.isFile()) throw new Error('not a file')
+    const name = path.basename(abs)
+    const ext = path.extname(abs).slice(1).toLowerCase()
+    reply.header('content-type', mimeOf(ext))
+    reply.header('content-length', st.size)
+    const asciiName = name.replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '_')
+    reply.header(
+      'content-disposition',
+      `attachment; filename="${asciiName}"; filename*=UTF-8''${encodeURIComponent(name)}`
+    )
+    return reply.send(await fsp.readFile(abs))
+  })
+
+  app.get('/api/fs/browse', async (req) => {
+    const q = req.query as { path?: string }
+    const { root, abs } = resolveBrowse(q.path ?? '')
+    await fsp.mkdir(root, { recursive: true })
+    const entries = await listDirs(abs)
+    return {
+      root,
+      path: path.relative(root, abs).split(path.sep).join('/'),
+      entries
+    }
+  })
+
+  app.post('/api/workspaces', async (req) => {
+    const body = req.body as { name?: string; path?: string }
+    const name = (body.name ?? '').trim()
+    const rel = body.path ?? ''
+    if (!name || /[\\/:*?"<>|]/.test(name)) throw new Error('nom de workspace invalide')
+    const { root, abs } = resolveBrowse(rel)
+    const st = await fsp.stat(abs).catch(() => null)
+    if (!st?.isDirectory()) throw new Error('dossier introuvable')
+    const cfg = loadConfig()
+    if (cfg.workspaces.some(w => w.name === name)) throw new Error(`workspace déjà existant : ${name}`)
+    cfg.workspaces.push({ name, path: abs === root ? root.replace(os.homedir(), '~') : abs.replace(os.homedir(), '~') })
+    saveConfig(cfg)
+    return { ok: true, name }
+  })
+
+  app.delete('/api/workspaces/:name', async (req) => {
+    const { name } = req.params as { name: string }
+    const cfg = loadConfig()
+    const before = cfg.workspaces.length
+    cfg.workspaces = cfg.workspaces.filter(w => w.name !== name)
+    if (cfg.workspaces.length === before) throw new Error(`workspace inconnu : ${name}`)
+    saveConfig(cfg)
+    return { ok: true }
   })
 
   app.put('/api/fs/file', async (req) => {

@@ -12,6 +12,9 @@ async function ensureInit(): Promise<void> {
         getModule: () => '/assets/typst_ts_renderer_bg.wasm'
       })
     })()
+    initPromise.catch(() => {
+      initPromise = null
+    })
   }
   return initPromise
 }

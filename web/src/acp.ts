@@ -61,6 +61,8 @@ export class AcpClient {
   private pending = new Map<number, Pending>()
   private handlers = new Set<NotificationHandler>()
   private requestHandler: ((method: string, params: any) => Promise<unknown>) | null = null
+  private closeReason: string | null = null
+  private onCloseHandlers = new Set<(reason: string) => void>()
 
   constructor(url: string) {
     this.ws = new WebSocket(url)
@@ -74,14 +76,36 @@ export class AcpClient {
       }
       this.dispatch(msg)
     }
+    this.ws.onclose = ev => {
+      const reason = ev.reason?.trim() || `websocket fermé (${ev.code})`
+      this.failAllPending(reason)
+      for (const fn of this.onCloseHandlers) fn(reason)
+    }
+    this.ws.onerror = () => {
+      this.failAllPending('erreur websocket')
+    }
+  }
+
+  private failAllPending(reason: string): void {
+    if (this.closeReason === null) this.closeReason = reason
+    for (const [, p] of this.pending) {
+      p.reject(new Error(this.closeReason))
+    }
+    this.pending.clear()
   }
 
   waitOpen(): Promise<void> {
     return new Promise((resolve, reject) => {
       if (this.ws.readyState === WebSocket.OPEN) return resolve()
+      if (this.closeReason !== null) return reject(new Error(this.closeReason))
       this.ws.addEventListener('open', () => resolve(), { once: true })
       this.ws.addEventListener('error', () => reject(new Error('websocket error')), { once: true })
+      this.ws.addEventListener('close', () => reject(new Error('websocket fermé')), { once: true })
     })
+  }
+
+  onClosed(fn: (reason: string) => void): void {
+    this.onCloseHandlers.add(fn)
   }
 
   onNotification(fn: NotificationHandler): void {
@@ -121,6 +145,9 @@ export class AcpClient {
 
   request(method: string, params?: unknown): Promise<any> {
     const id = this.nextId++
+    if (this.closeReason !== null || this.ws.readyState >= WebSocket.CLOSING) {
+      return Promise.reject(new Error(this.closeReason ?? 'websocket fermé'))
+    }
     return new Promise((resolve, reject) => {
       this.pending.set(id, { resolve, reject })
       this.sendRaw({ jsonrpc: '2.0', id, method, params })
@@ -158,6 +185,7 @@ export class AcpClient {
   }
 
   close(): void {
+    if (this.closeReason === null) this.closeReason = 'fermé'
     try {
       this.ws.close(1000)
     } catch {}

@@ -37,6 +37,7 @@ export default function Chat({ ws, onOpenFile }: Props) {
   const [input, setInput] = useState('')
   const [commands, setCommands] = useState<{ name: string; description: string }[]>([])
   const [expandedTools, setExpandedTools] = useState<Record<string, boolean>>({})
+  const [retry, setRetry] = useState(0)
   const sessionIdRef = useRef<string | null>(null)
   const lastUserText = useRef('')
   const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -130,6 +131,12 @@ export default function Chat({ ws, onOpenFile }: Props) {
         if (method === 'session/update') applyUpdate(params.update)
       })
 
+      c.onClosed(reason => {
+        if (disposed) return
+        setStatus('error')
+        pushItem({ kind: 'system', text: `Agent déconnecté : ${reason}` })
+      })
+
       c.onRequest(async (method, params) => {
         if (method === 'session/request_permission') {
           const options: any[] = params?.options ?? []
@@ -185,7 +192,7 @@ export default function Chat({ ws, onOpenFile }: Props) {
       currentClient?.close()
       setClient(null)
     }
-  }, [ws, storageKey, applyUpdate, pushItem])
+  }, [ws, storageKey, applyUpdate, pushItem, retry])
 
   const send = useCallback(async () => {
     if (!client || !sessionIdRef.current || workingRef.current) return
@@ -240,6 +247,11 @@ export default function Chat({ ws, onOpenFile }: Props) {
         Agent
         <span className={`chat-status ${status}`}>{statusLabel}</span>
         <div className="spacer" />
+        {status === 'error' && (
+          <button className="btn" onClick={() => setRetry(r => r + 1)}>
+            Reconnecter
+          </button>
+        )}
         <button className="btn" onClick={newChat} disabled={!client}>
           Nouvelle session
         </button>

@@ -38,7 +38,6 @@ interface Props {
   activePath: string | null
   onActivate: (path: string) => void
   onClose: (path: string) => void
-  onOpen: (path: string) => void
 }
 
 const vulcainHighlight = HighlightStyle.define([
@@ -109,7 +108,7 @@ const baseExtensions: Extension[] = [
 
 const IMAGE_EXT = /\.(png|jpe?g|gif|webp|svg|avif|bmp|ico)$/i
 
-export default function EditorPane({ ws, tabs, activePath, onActivate, onClose, onOpen }: Props) {
+export default function EditorPane({ ws, tabs, activePath, onActivate, onClose }: Props) {
   const [content, setContent] = useState('')
   const [dirty, setDirty] = useState<Record<string, boolean>>({})
   const [previewOn, setPreviewOn] = useState(true)
@@ -175,11 +174,17 @@ export default function EditorPane({ ws, tabs, activePath, onActivate, onClose, 
       const bytes = await typstPdfBytes(contentRef.current)
       const pdfPath = activePath.replace(/\.typ$/i, '') + '.pdf'
       await api.writeFileBase64(ws, pdfPath, bytesToBase64(bytes))
-      onOpen(pdfPath)
+      const name = pdfPath.split('/').pop() ?? 'document.pdf'
+      const a = document.createElement('a')
+      a.href = api.downloadUrl(ws, pdfPath)
+      a.download = name
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
     } catch (e: any) {
-      alert(`Export PDF impossible : ${e?.message ?? e}`)
+      alert(`Compilation impossible : ${e?.message ?? e}`)
     }
-  }, [ws, activePath, onOpen])
+  }, [ws, activePath])
 
   return (
     <>
@@ -211,7 +216,7 @@ export default function EditorPane({ ws, tabs, activePath, onActivate, onClose, 
             </button>
             {isTyp && (
               <button className="btn primary" onClick={exportPdf}>
-                Export PDF
+                Compiler PDF
               </button>
             )}
           </div>

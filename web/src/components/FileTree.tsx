@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
+import { useDropzone } from 'react-dropzone'
 import { Tree, type NodeApi } from 'react-arborist'
-import { getTree, mkdir, remove, rename, touch, type TreeEntry } from '../api'
+import { downloadUrl, getTree, mkdir, remove, rename, touch, writeFileBase64, type TreeEntry } from '../api'
 import { subscribeWatch } from '../watch-client'
 
 interface TreeNode {
@@ -110,6 +111,41 @@ export default function FileTree({ ws, onOpen }: Props) {
     return idx === -1 ? '' : node.path.slice(0, idx)
   }
 
+  const uploadDirRef = useRef('')
+  const [uploading, setUploading] = useState(false)
+
+  const uploadFiles = useCallback(
+    async (files: File[], dir: string) => {
+      if (files.length === 0) return
+      setUploading(true)
+      try {
+        for (const f of files) {
+          const base64 = await fileToBase64(f)
+          const rel = dir ? `${dir}/${f.name}` : f.name
+          await writeFileBase64(ws, rel, base64)
+        }
+      } catch (e: any) {
+        alert(`Upload impossible : ${e?.message ?? e}`)
+      } finally {
+        setUploading(false)
+        reload()
+      }
+    },
+    [ws, reload]
+  )
+
+  const onDrop = useCallback((files: File[]) => void uploadFiles(files, ''), [uploadFiles])
+  const { getRootProps, getInputProps, isDragActive, open: pickFiles } = useDropzone({
+    onDrop,
+    noClick: true,
+    noKeyboard: true
+  })
+
+  const pickInto = (dir: string) => {
+    uploadDirRef.current = dir
+    pickFiles()
+  }
+
   const doNewFile = async (dir: string) => {
     const name = window.prompt('Nom du fichier :')
     if (!name) return
@@ -158,12 +194,19 @@ export default function FileTree({ ws, onOpen }: Props) {
         <button className="icon-btn" title="Nouveau dossier" onClick={() => doNewFolder(parentDirOf(selectedId))}>
           ▤
         </button>
+        <input {...getInputProps()} />
+        <button className="icon-btn" title="Uploader des fichiers" disabled={uploading} onClick={() => pickInto('')}>
+          ⇧
+        </button>
         <div className="spacer" />
         <button className="icon-btn" title="Rafraichir" onClick={reload}>
           ⟳
         </button>
       </div>
-      <div className="tree-scroll" ref={wrapRef}>
+      <div
+        {...getRootProps({ className: 'tree-scroll' + (isDragActive ? ' drag-over' : '') })}
+        ref={wrapRef}
+      >
         {size.h > 50 && (
           <RowExtrasContext.Provider value={{ selectedId, setSelectedId, onOpen, setMenu }}>
             <Tree
@@ -179,13 +222,21 @@ export default function FileTree({ ws, onOpen }: Props) {
             </Tree>
           </RowExtrasContext.Provider>
         )}
+        {uploading && <div className="tree-uploading">Upload en cours…</div>}
       </div>
       {menu && (
         <div className="tree-context" style={{ left: menu.x, top: menu.y }}>
-          {menu.isDir && (
+          {menu.isDir ? (
             <>
               <button onClick={() => doNewFile(menu.path)}>Nouveau fichier ici</button>
               <button onClick={() => doNewFolder(menu.path)}>Nouveau dossier ici</button>
+              <button onClick={() => pickInto(menu.path)}>Uploader ici</button>
+            </>
+          ) : (
+            <>
+              <a href={downloadUrl(ws, menu.path)} download>
+                Télécharger
+              </a>
             </>
           )}
           <button onClick={() => doRename(menu.path)}>Renommer</button>
@@ -196,6 +247,15 @@ export default function FileTree({ ws, onOpen }: Props) {
       )}
     </>
   )
+}
+
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader()
+    r.onload = () => resolve(String(r.result).slice(String(r.result).indexOf(',') + 1))
+    r.onerror = () => reject(r.error ?? new Error('lecture impossible'))
+    r.readAsDataURL(file)
+  })
 }
 
 function RowView({ node, style, dragHandle }: any) {

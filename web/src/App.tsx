@@ -4,12 +4,14 @@ import { getMeta, setTheme, type Meta } from './api'
 import FileTree from './components/FileTree'
 import EditorPane, { type Tab } from './components/EditorPane'
 import Chat from './components/Chat'
+import WorkspaceModal from './components/WorkspaceModal'
 
 export default function App() {
   const [meta, setMeta] = useState<Meta | null>(null)
   const [activeWs, setActiveWs] = useState<string>(() => localStorage.getItem('vulcain.ws') ?? '')
   const [tabs, setTabs] = useState<Tab[]>([])
   const [activeTab, setActiveTab] = useState<string | null>(null)
+  const [wsModalOpen, setWsModalOpen] = useState(false)
 
   useEffect(() => {
     getMeta().then(m => {
@@ -60,21 +62,21 @@ export default function App() {
 
   const isConfigWs = activeWs === '__config__'
 
+  const selectWorkspace = useCallback((name: string) => {
+    setActiveWs(name)
+    getMeta().then(setMeta).catch(() => {})
+  }, [])
+
   return (
     <div className="app">
       <header className="topbar">
         <span className="logo">VULCAIN</span>
-        <select value={activeWs} onChange={e => setActiveWs(e.target.value)}>
-          {(meta?.workspaces ?? [{ name: activeWs || '...' }]).map(w => (
-            <option key={w.name} value={w.name}>
-              {isConfigWs && w.name === '__config__' ? 'Config' : w.name}
-            </option>
-          ))}
-          {!isConfigWs && <option value="__config__">Config</option>}
-        </select>
+        <button className="btn" onClick={() => setWsModalOpen(true)} title="Choisir / ajouter un workspace">
+          {isConfigWs ? 'Config' : activeWs || '…'} ▾
+        </button>
         <div className="spacer" />
         {isConfigWs && <span style={{ color: 'var(--muted)' }}>workspace configuration globale</span>}
-        <button className="btn" onClick={() => setActiveWs('__config__')} title="Ouvrir la config globale">
+        <button className="btn" onClick={() => setWsModalOpen(true)} title="Ouvrir la config globale">
           Config
         </button>
         <button className="btn" onClick={toggleTheme} title="Basculer le theme">
@@ -98,7 +100,6 @@ export default function App() {
                 activePath={activeTab}
                 onActivate={setActiveTab}
                 onClose={closeTab}
-                onOpen={openFile}
               />
             </div>
           </Panel>
@@ -108,6 +109,12 @@ export default function App() {
           </Panel>
         </PanelGroup>
       </div>
+      <WorkspaceModal
+        open={wsModalOpen}
+        activeWs={activeWs}
+        onSelect={selectWorkspace}
+        onClose={() => setWsModalOpen(false)}
+      />
     </div>
   )
 }
