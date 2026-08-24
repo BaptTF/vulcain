@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
 import { Tree, type NodeApi } from 'react-arborist'
 import { getTree, mkdir, remove, rename, touch, type TreeEntry } from '../api'
 import { subscribeWatch } from '../watch-client'
@@ -15,6 +15,27 @@ interface Props {
   ws: string
   onOpen: (path: string) => void
 }
+
+interface MenuState {
+  x: number
+  y: number
+  path: string
+  isDir: boolean
+}
+
+interface RowExtras {
+  selectedId: string | null
+  setSelectedId: (id: string) => void
+  onOpen: (path: string) => void
+  setMenu: (m: MenuState | null) => void
+}
+
+const RowExtrasContext = createContext<RowExtras>({
+  selectedId: null,
+  setSelectedId: () => {},
+  onOpen: () => {},
+  setMenu: () => {}
+})
 
 function buildTree(entries: TreeEntry[]): TreeNode[] {
   const byPath = new Map<string, TreeNode>()
@@ -43,7 +64,7 @@ export default function FileTree({ ws, onOpen }: Props) {
   const [nodes, setNodes] = useState<TreeNode[]>([])
   const [size, setSize] = useState({ w: 200, h: 400 })
   const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [menu, setMenu] = useState<{ x: number; y: number; path: string; isDir: boolean } | null>(null)
+  const [menu, setMenu] = useState<MenuState | null>(null)
   const wrapRef = useRef<HTMLDivElement>(null)
 
   const reload = useCallback(() => {
@@ -144,19 +165,19 @@ export default function FileTree({ ws, onOpen }: Props) {
       </div>
       <div className="tree-scroll" ref={wrapRef}>
         {size.h > 50 && (
-          <Tree
-            data={nodes}
-            width={size.w}
-            height={size.h}
-            rowHeight={24}
-            indent={14}
-            openByDefault={false}
-            initialOpenState={Object.fromEntries(nodes.filter(n => n.type === 'dir').map(n => [n.id, true]))}
-          >
-            {(
-              <RowView selectedId={selectedId} setSelectedId={setSelectedId} onOpen={onOpen} setMenu={setMenu} />
-            ) as any}
-          </Tree>
+          <RowExtrasContext.Provider value={{ selectedId, setSelectedId, onOpen, setMenu }}>
+            <Tree
+              data={nodes}
+              width={size.w}
+              height={size.h}
+              rowHeight={24}
+              indent={14}
+              openByDefault={false}
+              initialOpenState={Object.fromEntries(nodes.filter(n => n.type === 'dir').map(n => [n.id, true]))}
+            >
+              {RowView}
+            </Tree>
+          </RowExtrasContext.Provider>
         )}
       </div>
       {menu && (
@@ -177,15 +198,8 @@ export default function FileTree({ ws, onOpen }: Props) {
   )
 }
 
-function RowView({
-  node,
-  style,
-  dragHandle,
-  selectedId,
-  setSelectedId,
-  onOpen,
-  setMenu
-}: any) {
+function RowView({ node, style, dragHandle }: any) {
+  const { selectedId, setSelectedId, onOpen, setMenu } = useContext(RowExtrasContext)
   const n: NodeApi<TreeNode> = node
   const data = n.data
   const isSelected = selectedId === data.id

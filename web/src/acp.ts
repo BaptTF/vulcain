@@ -64,6 +64,16 @@ export class AcpClient {
 
   constructor(url: string) {
     this.ws = new WebSocket(url)
+    this.ws.onmessage = ev => {
+      if (typeof ev.data !== 'string') return
+      let msg: unknown
+      try {
+        msg = JSON.parse(ev.data)
+      } catch {
+        return
+      }
+      this.dispatch(msg)
+    }
   }
 
   waitOpen(): Promise<void> {

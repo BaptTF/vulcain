@@ -3,3 +3,4 @@ dist/
 web/public/assets/*.wasm
 *.log
 .DS_Store
+test/ui/ui-result.png
