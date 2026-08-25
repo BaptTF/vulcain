@@ -165,13 +165,16 @@ export default function EditorPane({ ws, tabs, activePath, onActivate, onClose, 
   }, [flush])
 
   const loadFile = useCallback(
-    (path: string) => {
-      if (contentsRef.current[path] !== undefined) return
+    (path: string, opts?: { force?: boolean }) => {
+      if (!opts?.force && contentsRef.current[path] !== undefined) return
       let cancelled = false
       api
         .readFile(ws, path)
         .then(c => {
-          if (!cancelled) setContents(prev => ({ ...prev, [path]: c }))
+          if (!cancelled) {
+            setContents(prev => ({ ...prev, [path]: c }))
+            setDirty(d => (d[path] ? { ...d, [path]: false } : d))
+          }
         })
         .catch(e => {
           if (!cancelled) setContents(prev => ({ ...prev, [path]: `// erreur de lecture: ${e.message}` }))
@@ -193,21 +196,22 @@ export default function EditorPane({ ws, tabs, activePath, onActivate, onClose, 
   }, [activePath, doSave])
 
   useEffect(() => {
-    let timer = 0
+    const timers: number[] = []
     const unsub = subscribeWatch(ws, msg => {
-      if (!activePath || msg.path !== activePath || msg.event !== 'change') return
-      const lastSave = saveGuardRef.current[activePath] ?? 0
+      if (msg.event !== 'change') return
+      if (!tabs.some(t => t.path === msg.path)) return
+      const lastSave = saveGuardRef.current[msg.path] ?? 0
       if (Date.now() - lastSave < SAVE_GUARD_WINDOW) return
-      window.clearTimeout(timer)
-      timer = window.setTimeout(() => {
-        if (!dirtyRef.current[activePath]) loadFile(activePath)
+      const timer = window.setTimeout(() => {
+        if (!dirtyRef.current[msg.path]) loadFile(msg.path, { force: true })
       }, 200)
+      timers.push(timer)
     })
     return () => {
-      window.clearTimeout(timer)
+      for (const t of timers) window.clearTimeout(t)
       unsub()
     }
-  }, [ws, activePath, loadFile])
+  }, [ws, tabs, loadFile])
 
   const handleChange = useCallback(
     (path: string, value: string) => {
@@ -358,6 +362,7 @@ function CodeEditor({
   onChangeRef.current = onChange
   const onSaveRef = useRef(onSave)
   onSaveRef.current = onSave
+  const syncingRef = useRef(false)
 
   useEffect(() => {
     if (!hostRef.current) return
@@ -369,7 +374,7 @@ function CodeEditor({
           ...baseExtensions,
           ...extensions,
           EditorView.updateListener.of(update => {
-            if (update.docChanged) onChangeRef.current(update.state.doc.toString())
+            if (update.docChanged && !syncingRef.current) onChangeRef.current(update.state.doc.toString())
           }),
           keymap.of([
             {
@@ -395,7 +400,9 @@ function CodeEditor({
     const v = viewRef.current
     if (!v) return
     if (v.state.doc.toString() !== value) {
+      syncingRef.current = true
       v.dispatch({ changes: { from: 0, to: v.state.doc.length, insert: value } })
+      syncingRef.current = false
     }
   }, [value])
 

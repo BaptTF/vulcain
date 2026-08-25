@@ -50,6 +50,58 @@ const diskContent = await page.evaluate(async () => {
 check('autosave writes content to disk after typing', diskContent.includes('AUTOSAVE_MARKER'))
 check('autosave clears dirty flag', !(await page.locator('.tab .dirty-dot').count()))
 
+// --- external file change: open tab should refresh when a file is modified on disk ---
+// use a dedicated file so welcome.md stays intact for the reload-restoration test below
+const putFile = (path, content) =>
+  page.evaluate(async ({ path: p, content: c }) => {
+    const ws = localStorage.getItem('vulcain.ws') || ''
+    const r = await fetch('/api/fs/file', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ws, path: p, content: c })
+    })
+    if (!r.ok) throw new Error('PUT failed: ' + r.status)
+  }, { path, content })
+const editorText = () => page.locator('.cm-content').first().textContent()
+const waitForEditor = async marker => {
+  for (let i = 0; i < 20; i++) {
+    await page.waitForTimeout(300)
+    if (((await editorText()) ?? '').includes(marker)) return true
+  }
+  return false
+}
+
+// active tab refresh
+await putFile('ext-change.md', 'ext-init\n')
+await page.waitForTimeout(600)
+const extRow = page.locator('[role="treeitem"]', { hasText: 'ext-change.md' }).first()
+check('file tree lists externally created file', await extRow.isVisible())
+await extRow.click()
+await page.waitForTimeout(500)
+const actMarker = 'ACTIVE_CHANGE_MARKER'
+await putFile('ext-change.md', `ext-updated ${actMarker}\n`)
+check('active tab refreshes content when file changes on disk', await waitForEditor(actMarker))
+
+// background tab refresh (content must be pulled in even while not focused)
+const bkgMarker = 'BKG_CHANGE_MARKER'
+await putFile('bkg-change.md', `bkg-init ${bkgMarker}\n`)
+await page.waitForTimeout(600)
+const bkgRow = page.locator('[role="treeitem"]', { hasText: 'bkg-change.md' }).first()
+check('file tree lists second external file', await bkgRow.isVisible())
+await bkgRow.click()
+await page.waitForTimeout(500)
+await page.locator('[role="treeitem"]', { hasText: 'ext-change.md' }).first().click()
+await page.waitForTimeout(300)
+await putFile('bkg-change.md', `bkg-updated ${bkgMarker}\n`)
+await page.waitForTimeout(800)
+await bkgRow.click()
+await page.waitForTimeout(300)
+check('background tab refreshes content when file changes on disk', ((await editorText()) ?? '').includes(bkgMarker))
+
+// bring welcome.md back to the foreground so the reload-restoration check targets it
+await page.locator('[role="treeitem"]', { hasText: 'welcome.md' }).first().click()
+await page.waitForTimeout(300)
+
 // --- remember open file across reload ---
 const persisted = await page.evaluate(() => {
   const key = `vulcain.tabs.${localStorage.getItem('vulcain.ws') || ''}`
@@ -62,7 +114,7 @@ await page.waitForTimeout(1500)
 check('editor reopens after reload', await page.locator('.cm-editor').first().isVisible())
 check(
   'reloaded tab is the restored file',
-  (await page.locator('.cm-content').first().textContent())?.includes('Bienvenue dans Vulcain') === true
+  ((await editorText()) ?? '').includes('Bienvenue dans Vulcain') === true
 )
 
 let chatStatus = ''
