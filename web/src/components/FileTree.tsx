@@ -50,7 +50,9 @@ function buildTree(entries: TreeEntry[]): TreeNode[] {
   const byPath = new Map<string, TreeNode>()
   const roots: TreeNode[] = []
   for (const e of entries) {
-    byPath.set(e.path, { id: e.path, name: e.name, path: e.path, type: e.type })
+    const node: TreeNode = { id: e.path, name: e.name, path: e.path, type: e.type }
+    if (e.type === 'dir') node.children = []
+    byPath.set(e.path, node)
   }
   for (const e of entries) {
     const node = byPath.get(e.path)!
@@ -406,10 +408,46 @@ function fileToBase64(file: File): Promise<string> {
   })
 }
 
+const iconSvgProps = {
+  width: 14,
+  height: 14,
+  viewBox: '0 0 16 16',
+  'aria-hidden': true,
+  fill: 'none',
+  stroke: 'currentColor',
+  strokeWidth: 1.1,
+  style: { flexShrink: 0 }
+} as const
+
+function FolderIcon({ open }: { open?: boolean }) {
+  return (
+    <svg {...iconSvgProps}>
+      {open ? (
+        <>
+          <path d="M2.5 10.5V3.5h3.6l1.3 1.3h6.9c.386 0 .7.314.7.7v2" />
+          <path d="M2 13.75l2-5.1a.7.7 0 0 1 .65-.45h10.3a.35.35 0 0 1 .33.47l-2 5.1a.7.7 0 0 1-.66.43H2a.4.4 0 0 1-.37-.52z" />
+        </>
+      ) : (
+        <path d="M1.5 12.8V3.2c0-.386.314-.7.7-.7h3.9l1.3 1.3h6.9c.386 0 .7.314.7.7v8.3c0 .386-.314.7-.7.7H2.2a.7.7 0 0 1-.7-.7z" />
+      )}
+    </svg>
+  )
+}
+
+function FileIcon() {
+  return (
+    <svg {...iconSvgProps} strokeLinejoin="round">
+      <path d="M13.5 14.5h-11V1.5h7l4 4v9z" />
+      <path d="M9.5 1.5v4h4" />
+    </svg>
+  )
+}
+
 function RowView({ node, style, dragHandle }: any) {
   const { selectedId, setSelectedId, onOpen, setMenu } = useContext(RowExtrasContext)
   const n: NodeApi<TreeNode> = node
   const data = n.data
+  const isDir = data.type === 'dir'
   const isSelected = selectedId === data.id
   const editing = n.isEditing
   const inputRef = useRef<HTMLInputElement | null>(null)
@@ -439,7 +477,7 @@ function RowView({ node, style, dragHandle }: any) {
       onClick={() => {
         if (editing) return
         setSelectedId(data.id)
-        if (n.isInternal) n.toggle()
+        if (isDir) n.toggle()
         else onOpen(data.path)
       }}
       onContextMenu={e => {
@@ -447,13 +485,16 @@ function RowView({ node, style, dragHandle }: any) {
         e.stopPropagation()
         if (editing) return
         setSelectedId(data.id)
-        setMenu({ x: e.clientX, y: e.clientY, path: data.path, isDir: n.isInternal })
+        setMenu({ x: e.clientX, y: e.clientY, path: data.path, isDir })
       }}
     >
       {!editing && (
-        <span style={{ color: 'var(--muted)', fontSize: 10, width: 10, textAlign: 'center' }}>
-          {n.isInternal ? (n.isOpen ? '▾' : '▸') : ''}
-        </span>
+        <>
+          <span style={{ color: 'var(--muted)', fontSize: 10, width: 10, textAlign: 'center', flexShrink: 0 }}>
+            {isDir ? (n.isOpen ? '▾' : '▸') : ''}
+          </span>
+          {isDir ? <FolderIcon open={n.isOpen} /> : <FileIcon />}
+        </>
       )}
       {editing ? (
         <input
