@@ -228,6 +228,69 @@ const wsFailures = consoleErrors.filter(e => e.includes('/api/acp') || e.include
 check('no websocket connection errors', wsFailures.length === 0)
 if (wsFailures.length) console.log('  ->', wsFailures[0].slice(0, 160))
 
+// --- workspace selector: fast switcher + open-folder explorer ---
+const wsTrigger = page.locator('.topbar .btn', { hasText: '▾' }).first()
+const wsItem = text => page.locator('.ws-menu .ws-menu-item', { hasText: text }).first()
+await wsTrigger.click()
+await page.waitForTimeout(300)
+check('fast switcher lists configured workspace', await wsItem('Notes').isVisible())
+check('fast switcher lists config workspace', await wsItem('Config').isVisible())
+// switch away and back through the dropdown
+await wsItem('Config').click()
+await page.waitForTimeout(300)
+console.log(`  trigger after Config: ${(await wsTrigger.textContent())?.trim()}`)
+await wsTrigger.click()
+await page.waitForTimeout(300)
+await wsItem('Notes').click()
+let switchedBack = false
+for (let i = 0; i < 10; i++) {
+  await page.waitForTimeout(300)
+  if (/notes/i.test((await wsTrigger.textContent()) ?? '')) {
+    switchedBack = true
+    break
+  }
+}
+check('switcher switches back to notes workspace', switchedBack)
+console.log(`  trigger after notes: ${(await wsTrigger.textContent())?.trim()}`)
+// open the folder-explorer via the dropdown entry
+await wsTrigger.click()
+await page.waitForTimeout(300)
+await wsItem('Ouvrir un dossier').click()
+await page.waitForTimeout(400)
+check('open-folder modal opens from switcher', await page.locator('.ws-modal').isVisible())
+// right-click the browser background (nav bar) -> create a folder at the browse root
+await page.locator('.ws-nav').click({ button: 'right' })
+await page.waitForTimeout(300)
+const newFolderItem = page.locator('.ws-menu-item', { hasText: /^Nouveau dossier$/ }).first()
+check('context menu offers new folder', await newFolderItem.isVisible())
+await newFolderItem.click()
+let folderListed = false
+for (let i = 0; i < 10; i++) {
+  await page.waitForTimeout(300)
+  if (await page.locator('.ws-dir', { hasText: /Nouveau dossier/ }).first().isVisible()) {
+    folderListed = true
+    break
+  }
+}
+check('created folder appears in browser', folderListed)
+// open it as a workspace
+await page.locator('.ws-actions .btn.primary').click()
+let folderOpened = false
+for (let i = 0; i < 10; i++) {
+  await page.waitForTimeout(300)
+  if (/nouveau dossier/i.test((await wsTrigger.textContent()) ?? '')) {
+    folderOpened = true
+    break
+  }
+}
+check('created folder opened as workspace', folderOpened)
+// cleanup: close the dialog if it stayed open and switch back
+await page.locator('.ws-modal .icon-btn').first().click().catch(() => {})
+await wsTrigger.click()
+await page.waitForTimeout(300)
+await wsItem('Notes').click()
+await page.waitForTimeout(400)
+
 await page.screenshot({ path: '/work/ui-result.png', fullPage: true })
 
 await browser.close()

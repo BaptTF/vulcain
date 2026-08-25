@@ -101,6 +101,10 @@ export function browse(path: string): Promise<BrowseResult> {
   return req(`/api/fs/browse?path=${encodeURIComponent(path)}`)
 }
 
+export function browseMkdir(path: string): Promise<void> {
+  return req('/api/fs/browse/mkdir', { method: 'POST', body: JSON.stringify({ path }) })
+}
+
 export function addWorkspace(name: string, path: string): Promise<void> {
   return req('/api/workspaces', { method: 'POST', body: JSON.stringify({ name, path }) })
 }

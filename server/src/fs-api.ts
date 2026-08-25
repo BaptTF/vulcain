@@ -170,6 +170,15 @@ export function registerFsApi(app: FastifyInstance): void {
     }
   })
 
+  app.post('/api/fs/browse/mkdir', async (req) => {
+    const body = req.body as { path?: string }
+    const rawPath = (body.path ?? '').trim()
+    if (!rawPath) throw new Error('chemin requis')
+    const { abs } = resolveBrowse(rawPath)
+    await fsp.mkdir(abs, { recursive: true })
+    return { ok: true }
+  })
+
   app.post('/api/workspaces', async (req) => {
     const body = req.body as { name?: string; path?: string }
     const rawPath = (body.path ?? '').trim()

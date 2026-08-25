@@ -11,6 +11,7 @@ import FileTree from './components/FileTree'
 import EditorPane, { type Tab } from './components/EditorPane'
 import Chat from './components/Chat'
 import WorkspaceModal from './components/WorkspaceModal'
+import WorkspaceSwitcher from './components/WorkspaceSwitcher'
 
 type PaneId = 'tree' | 'editor' | 'preview' | 'agent'
 const MAIN_PANES: PaneId[] = ['editor', 'preview', 'agent']
@@ -157,9 +158,7 @@ export default function App() {
       />
       <header className="topbar">
         <span className="logo">VULCAIN</span>
-        <button className="btn" onClick={() => setWsModalOpen(true)} title="Choisir / ajouter un workspace">
-          {isConfigWs ? 'Config' : activeWs || '…'} ▾
-        </button>
+        <WorkspaceSwitcher activeWs={activeWs} onSelect={selectWorkspace} onOpenFolder={() => setWsModalOpen(true)} />
         <div className="spacer" />
         {isConfigWs && <span style={{ color: 'var(--muted)' }}>workspace configuration globale</span>}
         <button className="btn" onClick={toggleTheme} title="Basculer le theme">
@@ -228,7 +227,6 @@ export default function App() {
       </div>
       <WorkspaceModal
         open={wsModalOpen}
-        activeWs={activeWs}
         onSelect={selectWorkspace}
         onClose={() => setWsModalOpen(false)}
       />
