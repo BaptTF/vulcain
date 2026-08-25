@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type MutableRefObject } from 'react'
 import { EditorState, type Extension } from '@codemirror/state'
 import {
   EditorView,
@@ -39,6 +39,7 @@ interface Props {
   activePath: string | null
   onActivate: (path: string) => void
   onClose: (path: string) => void
+  flushRef?: MutableRefObject<(() => void) | null>
 }
 
 const vulcainHighlight = HighlightStyle.define([
@@ -109,70 +110,143 @@ const baseExtensions: Extension[] = [
 
 const IMAGE_EXT = /\.(png|jpe?g|gif|webp|svg|avif|bmp|ico)$/i
 
-export default function EditorPane({ ws, tabs, activePath, onActivate, onClose }: Props) {
-  const [content, setContent] = useState('')
+const AUTOSAVE_DELAY = 1000
+const SAVE_GUARD_WINDOW = 400
+
+export default function EditorPane({ ws, tabs, activePath, onActivate, onClose, flushRef }: Props) {
+  const [contents, setContents] = useState<Record<string, string>>({})
   const [dirty, setDirty] = useState<Record<string, boolean>>({})
   const [previewOn, setPreviewOn] = useState(true)
-  const contentRef = useRef('')
-  contentRef.current = content
+  const contentsRef = useRef<Record<string, string>>({})
+  contentsRef.current = contents
+  const dirtyRef = useRef<Record<string, boolean>>({})
+  dirtyRef.current = dirty
+  const saveTimersRef = useRef<Record<string, number>>({})
+  const saveGuardRef = useRef<Record<string, number>>({})
+
+  const doSave = useCallback(
+    async (path: string): Promise<void> => {
+      const content = contentsRef.current[path]
+      if (content === undefined) return
+      try {
+        await api.writeFile(ws, path, content)
+        saveGuardRef.current[path] = Date.now()
+        setDirty(d => (d[path] ? { ...d, [path]: false } : d))
+      } catch (e: any) {
+        toast.error('Sauvegarde impossible', { description: e.message })
+      }
+    },
+    [ws]
+  )
+
+  const flush = useCallback(() => {
+    for (const path of Object.keys(dirtyRef.current)) {
+      if (!dirtyRef.current[path]) continue
+      const timer = saveTimersRef.current[path]
+      if (timer) {
+        window.clearTimeout(timer)
+        delete saveTimersRef.current[path]
+      }
+      void doSave(path)
+    }
+  }, [doSave])
 
   useEffect(() => {
-    if (!activePath) {
-      setContent('')
-      return
-    }
-    let cancelled = false
-    api
-      .readFile(ws, activePath)
-      .then(c => {
-        if (!cancelled) setContent(c)
-      })
-      .catch(e => {
-        if (!cancelled) setContent(`// erreur de lecture: ${e.message}`)
-      })
+    if (flushRef) flushRef.current = flush
     return () => {
-      cancelled = true
+      if (flushRef) flushRef.current = null
     }
-  }, [ws, activePath])
+  }, [flush, flushRef])
+
+  useEffect(() => {
+    const onBeforeUnload = () => flush()
+    window.addEventListener('beforeunload', onBeforeUnload)
+    return () => window.removeEventListener('beforeunload', onBeforeUnload)
+  }, [flush])
+
+  const loadFile = useCallback(
+    (path: string) => {
+      if (contentsRef.current[path] !== undefined) return
+      let cancelled = false
+      api
+        .readFile(ws, path)
+        .then(c => {
+          if (!cancelled) setContents(prev => ({ ...prev, [path]: c }))
+        })
+        .catch(e => {
+          if (!cancelled) setContents(prev => ({ ...prev, [path]: `// erreur de lecture: ${e.message}` }))
+        })
+      return () => {
+        cancelled = true
+      }
+    },
+    [ws]
+  )
+
+  useEffect(() => {
+    if (activePath) loadFile(activePath)
+  }, [activePath, loadFile])
 
   const save = useCallback(async () => {
     if (!activePath) return
-    try {
-      await api.writeFile(ws, activePath, contentRef.current)
-      setDirty(d => ({ ...d, [activePath]: false }))
-    } catch (e: any) {
-      toast.error('Sauvegarde impossible', { description: e.message })
-    }
-  }, [ws, activePath])
+    await doSave(activePath)
+  }, [activePath, doSave])
 
   useEffect(() => {
     let timer = 0
     const unsub = subscribeWatch(ws, msg => {
       if (!activePath || msg.path !== activePath || msg.event !== 'change') return
+      const lastSave = saveGuardRef.current[activePath] ?? 0
+      if (Date.now() - lastSave < SAVE_GUARD_WINDOW) return
       window.clearTimeout(timer)
       timer = window.setTimeout(() => {
-        if (!dirty[activePath]) {
-          api
-            .readFile(ws, activePath)
-            .then(c => setContent(c))
-            .catch(() => {})
-        }
+        if (!dirtyRef.current[activePath]) loadFile(activePath)
       }, 200)
     })
     return () => {
       window.clearTimeout(timer)
       unsub()
     }
-  }, [ws, activePath, dirty])
+  }, [ws, activePath, loadFile])
 
+  const handleChange = useCallback(
+    (path: string, value: string) => {
+      setContents(prev => ({ ...prev, [path]: value }))
+      setDirty(d => ({ ...d, [path]: true }))
+      const existing = saveTimersRef.current[path]
+      if (existing) window.clearTimeout(existing)
+      saveTimersRef.current[path] = window.setTimeout(() => {
+        delete saveTimersRef.current[path]
+        void doSave(path)
+      }, AUTOSAVE_DELAY)
+    },
+    [doSave]
+  )
+
+  const handleClose = useCallback(
+    (path: string) => {
+      if (dirtyRef.current[path]) {
+        const timer = saveTimersRef.current[path]
+        if (timer) {
+          window.clearTimeout(timer)
+          delete saveTimersRef.current[path]
+        }
+        void doSave(path)
+      }
+      onClose(path)
+    },
+    [doSave, onClose]
+  )
+
+  const content = activePath ? contents[activePath] ?? '' : ''
   const isMd = !!activePath && /\.md$/i.test(activePath)
   const isTyp = !!activePath && /\.typ$/i.test(activePath)
   const showPreview = previewOn && (isMd || isTyp)
 
   const exportPdf = useCallback(async () => {
-    if (!activePath || !contentRef.current) return
+    if (!activePath || !content) return
     try {
-      const bytes = await typstPdfBytes(contentRef.current)
+      const bytes = await typstPdfBytes(content)
       const pdfPath = activePath.replace(/\.typ$/i, '') + '.pdf'
       await api.writeFileBase64(ws, pdfPath, bytesToBase64(bytes))
       const name = pdfPath.split('/').pop() ?? 'document.pdf'
@@ -185,7 +259,7 @@ export default function EditorPane({ ws, tabs, activePath, onActivate, onClose }
     } catch (e: any) {
       toast.error('Compilation impossible', { description: String(e?.message ?? e) })
     }
-  }, [ws, activePath])
+  }, [ws, activePath, content])
 
   return (
     <>
@@ -203,7 +277,7 @@ export default function EditorPane({ ws, tabs, activePath, onActivate, onClose }
               className="icon-btn"
               onClick={e => {
                 e.stopPropagation()
-                onClose(t.path)
+                handleClose(t.path)
               }}
             >
               ×
@@ -241,10 +315,7 @@ export default function EditorPane({ ws, tabs, activePath, onActivate, onClose }
                     key={`${ws}:${activePath}`}
                     value={content}
                     extensions={langExtensions(activePath)}
-                    onChange={v => {
-                      setContent(v)
-                      setDirty(d => ({ ...d, [activePath]: true }))
-                    }}
+                    onChange={v => handleChange(activePath, v)}
                     onSave={save}
                   />
                 </div>
@@ -258,10 +329,7 @@ export default function EditorPane({ ws, tabs, activePath, onActivate, onClose }
                   key={`${ws}:${activePath}`}
                   value={content}
                   extensions={langExtensions(activePath)}
-                  onChange={v => {
-                    setContent(v)
-                    setDirty(d => ({ ...d, [activePath]: true }))
-                  }}
+                  onChange={v => handleChange(activePath, v)}
                   onSave={save}
                 />
               </div>

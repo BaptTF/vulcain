@@ -13,6 +13,8 @@
     "dev": "concurrently -n server,web -c blue,cyan \"npm run dev -w server\" \"npm run dev -w web\"",
     "build": "npm run build -w pi-ext && npm run build -w server && npm run build -w web",
     "start": "npm run start -w server",
+    "test:ui": "node scripts/test-ui.mjs",
+    "test:ui:docker": "docker build -f docker/Dockerfile.test -t vulcain-test . && docker run --rm vulcain-test",
     "lint": "eslint ."
   },
   "devDependencies": {

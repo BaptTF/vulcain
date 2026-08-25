@@ -39,6 +39,32 @@ check(
   (await page.locator('.cm-content').first().textContent())?.includes('Bienvenue dans Vulcain') === true
 )
 
+// --- autosave: typing should persist to disk after the debounce ---
+await page.locator('.cm-content').first().click()
+await page.keyboard.type(' AUTOSAVE_MARKER')
+await page.waitForTimeout(1600) // > AUTOSAVE_DELAY (1s) + latency
+const diskContent = await page.evaluate(async () => {
+  const r = await fetch(`/api/fs/file?ws=${encodeURIComponent(localStorage.getItem('vulcain.ws') || '')}&path=welcome.md`)
+  return r.ok ? await r.text() : ''
+})
+check('autosave writes content to disk after typing', diskContent.includes('AUTOSAVE_MARKER'))
+check('autosave clears dirty flag', !(await page.locator('.tab .dirty-dot').count()))
+
+// --- remember open file across reload ---
+const persisted = await page.evaluate(() => {
+  const key = `vulcain.tabs.${localStorage.getItem('vulcain.ws') || ''}`
+  return localStorage.getItem(key)
+})
+check('open tabs persisted to localStorage', !!persisted && persisted.includes('welcome.md'))
+
+await page.reload({ waitUntil: 'domcontentloaded' })
+await page.waitForTimeout(1500)
+check('editor reopens after reload', await page.locator('.cm-editor').first().isVisible())
+check(
+  'reloaded tab is the restored file',
+  (await page.locator('.cm-content').first().textContent())?.includes('Bienvenue dans Vulcain') === true
+)
+
 let chatStatus = ''
 for (let i = 0; i < 20; i++) {
   await page.waitForTimeout(1000)
@@ -47,7 +73,7 @@ for (let i = 0; i < 20; i++) {
 }
 console.log(`  chat status: ${chatStatus}`)
 check('agent websocket connected (chat pret)', chatStatus === 'prêt')
-check('real agent greeted via ACP bridge', (await page.locator('.chat-messages').textContent())?.includes('pi') === true)
+check('real agent greeted via ACP bridge', (await page.locator('.chat-messages').textContent())?.includes('fake-agent') === true)
 
 // Le bouton Envoyer doit au minimum afficher le message de l'utilisateur
 // (le bug historique etait un clic sans aucun effet quand la connexion pendait)

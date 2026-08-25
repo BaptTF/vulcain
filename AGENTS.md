@@ -47,6 +47,31 @@ VULCAIN_HOME=/tmp/vulcain-test VULCAIN_PORT=7391 node server/dist/index.js &
 node test/e2e.mjs        # 8 checks: watch + initialize/session/prompt/streaming/tool_call
 ```
 
+### UI tests (`test/ui/ui.spec.mjs`)
+
+The UI suite drives a real Chromium via Playwright and needs the app served
+plus the fake agent (`test/fake-agent.mjs`). It covers the editor (open, content,
+**autosave on typing**, **open-tab restoration across reload**), file tree and chat.
+
+- **Native (fast path, when Chromium deps are available):** the runner bootstraps an
+  isolated env, starts the server (serves `web/dist` + API on one port) and runs the spec:
+
+  ```bash
+  npm run test:ui     # node scripts/test-ui.mjs (VULCAIN_PORT / BASE_URL overridable)
+  ```
+
+- **Docker (self-contained, works on hosts lacking Chromium libs, e.g. NixOS):**
+  `docker/Dockerfile.test` installs Playwright + Chromium deps and runs the same script:
+
+  ```bash
+  npm run test:ui:docker   # builds vulcain-test image then runs it
+  ```
+
+  `scripts/test-ui.mjs` is the single source of truth for the test setup: fresh
+  `VULCAIN_HOME`, `agent.command` pointed at the fake agent, a `Notes` workspace
+  with `welcome.md`, then server + spec. UI tests are run in CI-equivalent Docker
+  when Chromium isn't installed locally.
+
 ## Project rules
 
 These rules apply to every contribution. Violations are treated as review blockers.

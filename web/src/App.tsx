@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels'
 import { Toaster } from 'sonner'
 import { getMeta, setTheme, type Meta } from './api'
@@ -12,7 +12,33 @@ export default function App() {
   const [activeWs, setActiveWs] = useState<string>(() => localStorage.getItem('vulcain.ws') ?? '')
   const [tabs, setTabs] = useState<Tab[]>([])
   const [activeTab, setActiveTab] = useState<string | null>(null)
+  const [restored, setRestored] = useState(false)
   const [wsModalOpen, setWsModalOpen] = useState(false)
+  const flushRef = useRef<(() => void) | null>(null)
+  const activeWsRef = useRef(activeWs)
+  activeWsRef.current = activeWs
+
+  const tabsKey = (ws: string) => `vulcain.tabs.${ws}`
+  const readSaved = useCallback((ws: string): { tabs: string[]; active: string | null } => {
+    try {
+      const raw = localStorage.getItem(`vulcain.tabs.${ws}`)
+      if (!raw) return { tabs: [], active: null }
+      const parsed = JSON.parse(raw)
+      if (Array.isArray(parsed.tabs) && typeof parsed.active === 'string') {
+        return { tabs: parsed.tabs as string[], active: parsed.active }
+      }
+    } catch {}
+    return { tabs: [], active: null }
+  }, [])
+
+  const restoreTabs = useCallback(
+    (ws: string) => {
+      const saved = readSaved(ws)
+      setTabs(saved.tabs.map(p => ({ path: p })))
+      setActiveTab(saved.active)
+    },
+    [readSaved]
+  )
 
   useEffect(() => {
     getMeta().then(m => {
@@ -33,9 +59,21 @@ export default function App() {
   }, [activeWs])
 
   useEffect(() => {
-    setTabs([])
-    setActiveTab(null)
-  }, [activeWs])
+    if (!restored) return
+    try {
+      localStorage.setItem(
+        tabsKey(activeWs),
+        JSON.stringify({ tabs: tabs.map(t => t.path), active: activeTab })
+      )
+    } catch {}
+  }, [tabs, activeTab, activeWs, restored, tabsKey])
+
+  useEffect(() => {
+    if (activeWsRef.current && activeWsRef.current !== activeWs) flushRef.current?.()
+    setRestored(false)
+    restoreTabs(activeWs)
+    setRestored(true)
+  }, [activeWs, restoreTabs])
 
   const openFile = useCallback((path: string) => {
     setTabs(prev => {
@@ -105,6 +143,7 @@ export default function App() {
                 activePath={activeTab}
                 onActivate={setActiveTab}
                 onClose={closeTab}
+                flushRef={flushRef}
               />
             </div>
           </Panel>
