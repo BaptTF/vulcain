@@ -32,8 +32,6 @@ COPY --from=build /app/pi-ext/dist ./pi-ext/dist
 COPY --from=build /app/scripts ./scripts
 COPY --from=build /app/package.json ./package.json
 
-VOLUME ["/data/workspaces", "/data/.vulcain", "/data/.pi"]
-
 EXPOSE 7331
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
