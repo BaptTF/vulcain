@@ -23,6 +23,7 @@ import { languages as codeLanguages } from '@codemirror/language-data'
 import { json } from '@codemirror/lang-json'
 import { tags as t } from '@lezer/highlight'
 import { indentWithTab } from '@codemirror/commands'
+import { toast } from 'sonner'
 import { subscribeWatch } from '../watch-client'
 import * as api from '../api'
 import { bytesToBase64, typstPdfBytes } from '../typst'
@@ -140,7 +141,7 @@ export default function EditorPane({ ws, tabs, activePath, onActivate, onClose }
       await api.writeFile(ws, activePath, contentRef.current)
       setDirty(d => ({ ...d, [activePath]: false }))
     } catch (e: any) {
-      alert(`Sauvegarde impossible : ${e.message}`)
+      toast.error('Sauvegarde impossible', { description: e.message })
     }
   }, [ws, activePath])
 
@@ -182,7 +183,7 @@ export default function EditorPane({ ws, tabs, activePath, onActivate, onClose }
       a.click()
       a.remove()
     } catch (e: any) {
-      alert(`Compilation impossible : ${e?.message ?? e}`)
+      toast.error('Compilation impossible', { description: String(e?.message ?? e) })
     }
   }, [ws, activePath])
 

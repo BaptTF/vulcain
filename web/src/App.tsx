@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels'
+import { Toaster } from 'sonner'
 import { getMeta, setTheme, type Meta } from './api'
 import FileTree from './components/FileTree'
 import EditorPane, { type Tab } from './components/EditorPane'
@@ -69,6 +70,12 @@ export default function App() {
 
   return (
     <div className="app">
+      <Toaster
+        theme={meta?.theme === 'light' ? 'light' : 'dark'}
+        position="bottom-right"
+        richColors
+        closeButton
+      />
       <header className="topbar">
         <span className="logo">VULCAIN</span>
         <button className="btn" onClick={() => setWsModalOpen(true)} title="Choisir / ajouter un workspace">

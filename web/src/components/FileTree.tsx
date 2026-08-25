@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
 import { useDropzone } from 'react-dropzone'
-import { Tree, type NodeApi } from 'react-arborist'
+import { Tree, type NodeApi, type RenameHandler, type TreeApi } from 'react-arborist'
+import { toast } from 'sonner'
 import { downloadUrl, getTree, mkdir, remove, rename, touch, writeFileBase64, type TreeEntry } from '../api'
 import { subscribeWatch } from '../watch-client'
 
@@ -22,6 +23,13 @@ interface MenuState {
   y: number
   path: string
   isDir: boolean
+  background?: boolean
+}
+
+interface PendingCreate {
+  id: string
+  dir: string
+  type: 'file' | 'dir'
 }
 
 interface RowExtras {
@@ -61,12 +69,40 @@ function buildTree(entries: TreeEntry[]): TreeNode[] {
   return roots
 }
 
+function insertTemp(list: TreeNode[], dir: string, tmp: TreeNode): TreeNode[] | null {
+  for (let i = 0; i < list.length; i++) {
+    const n = list[i]
+    if (n.type === 'dir' && n.path === dir) {
+      const copy: TreeNode = { ...n, children: [...(n.children ?? []), tmp] }
+      return [...list.slice(0, i), copy, ...list.slice(i + 1)]
+    }
+    if (n.children) {
+      const sub = insertTemp(n.children, dir, tmp)
+      if (sub) return [...list.slice(0, i), { ...n, children: sub }, ...list.slice(i + 1)]
+    }
+  }
+  return null
+}
+
+function removeById(list: TreeNode[], id: string): TreeNode[] | null {
+  for (let i = 0; i < list.length; i++) {
+    const n = list[i]
+    if (n.id === id) return [...list.slice(0, i), ...list.slice(i + 1)]
+    if (n.children) {
+      const sub = removeById(n.children, id)
+      if (sub) return [...list.slice(0, i), { ...n, children: sub }, ...list.slice(i + 1)]
+    }
+  }
+  return null
+}
+
 export default function FileTree({ ws, onOpen }: Props) {
   const [nodes, setNodes] = useState<TreeNode[]>([])
   const [size, setSize] = useState({ w: 200, h: 400 })
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [menu, setMenu] = useState<MenuState | null>(null)
   const wrapRef = useRef<HTMLDivElement>(null)
+  const treeRef = useRef<TreeApi<TreeNode> | undefined>(undefined)
 
   const reload = useCallback(() => {
     getTree(ws)
@@ -125,7 +161,7 @@ export default function FileTree({ ws, onOpen }: Props) {
           await writeFileBase64(ws, rel, base64)
         }
       } catch (e: any) {
-        alert(`Upload impossible : ${e?.message ?? e}`)
+        toast.error('Upload impossible', { description: String(e?.message ?? e) })
       } finally {
         setUploading(false)
         reload()
@@ -146,52 +182,145 @@ export default function FileTree({ ws, onOpen }: Props) {
     pickFiles()
   }
 
-  const doNewFile = async (dir: string) => {
-    const name = window.prompt('Nom du fichier :')
-    if (!name) return
-    const p = dir ? `${dir}/${name}` : name
-    await touch(ws, p)
-    reload()
-    onOpen(p)
+  const requestDelete = useCallback(
+    (path: string) => {
+      toast(`Supprimer « ${path} » ?`, {
+        description: 'Cette action est définitive.',
+        duration: 10000,
+        action: {
+          label: 'Supprimer',
+          onClick: async () => {
+            try {
+              await remove(ws, path)
+              toast.success(`« ${path} » supprimé`)
+            } catch (e: any) {
+              toast.error('Suppression impossible', { description: String(e?.message ?? e) })
+            }
+            reload()
+          }
+        },
+        cancel: { label: 'Annuler', onClick: () => {} }
+      })
+    },
+    [ws, reload]
+  )
+
+  const tmpSeq = useRef(0)
+  const pendingCreate = useRef<PendingCreate | null>(null)
+
+  const discardTemp = useCallback((id: string) => {
+    setNodes(prev => removeById(prev, id) ?? prev)
+  }, [])
+
+  const handleRename: RenameHandler<TreeNode> = useCallback(
+    async ({ id, name }) => {
+      const pending = pendingCreate.current
+      if (pending && pending.id === id) {
+        pendingCreate.current = null
+        discardTemp(id)
+        const clean = name.trim()
+        if (!clean || clean.includes('/')) return
+        const p = pending.dir ? `${pending.dir}/${clean}` : clean
+        try {
+          if (pending.type === 'dir') {
+            await mkdir(ws, p)
+          } else {
+            await touch(ws, p)
+            onOpen(p)
+          }
+        } catch (e: any) {
+          toast.error('Création impossible', { description: String(e?.message ?? e) })
+        }
+        reload()
+        return
+      }
+      const clean = name.trim()
+      if (!clean || clean.includes('/') || clean === id) return
+      const idx = id.lastIndexOf('/')
+      const to = idx === -1 ? clean : `${id.slice(0, idx)}/${clean}`
+      try {
+        await rename(ws, id, to)
+      } catch (e: any) {
+        toast.error('Renommage impossible', { description: String(e?.message ?? e) })
+      }
+      reload()
+    },
+    [ws, reload, onOpen, discardTemp]
+  )
+
+  const beginCreate = useCallback(
+    (type: 'file' | 'dir', dir: string) => {
+      const tree = treeRef.current
+      if (!tree) return
+      if (dir) tree.open(dir)
+      const id = `__new_${type}_${Date.now()}_${++tmpSeq.current}`
+      pendingCreate.current = { id, dir, type }
+      const tmp: TreeNode = { id, name: '', path: dir ? `${dir}/` : '', type: type === 'dir' ? 'dir' : 'file' }
+      setNodes(prev => (dir ? insertTemp(prev, dir, tmp) ?? [...prev, tmp] : [...prev, tmp]))
+      window.setTimeout(async () => {
+        try {
+          const res = await tree.edit(id)
+          if (res.cancelled) {
+            pendingCreate.current = null
+            discardTemp(id)
+          }
+        } catch {}
+      }, 0)
+    },
+    [discardTemp]
+  )
+
+  const beginRename = useCallback((path: string) => {
+    const tree = treeRef.current
+    if (!tree) return
+    void tree.edit(path)
+  }, [])
+
+  const onTreeKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key !== 'F2') return
+    const tree = treeRef.current
+    if (!tree) return
+    const node = (selectedId ? tree.get(selectedId) : null) ?? tree.focusedNode
+    if (!node || node.isEditing) return
+    e.preventDefault()
+    void tree.edit(node)
   }
 
-  const doNewFolder = async (dir: string) => {
-    const name = window.prompt('Nom du dossier :')
-    if (!name) return
-    await mkdir(ws, dir ? `${dir}/${name}` : name)
-    reload()
-  }
-
-  const doRename = async (path: string) => {
-    const idx = path.lastIndexOf('/')
-    const cur = idx === -1 ? path : path.slice(idx + 1)
-    const name = window.prompt('Nouveau nom :', cur)
-    if (!name || name === cur) return
-    const to = idx === -1 ? name : `${path.slice(0, idx)}/${name}`
-    await rename(ws, path, to)
-    reload()
-  }
-
-  const doDelete = async (path: string) => {
-    if (!window.confirm(`Supprimer "${path}" ?`)) return
-    await remove(ws, path)
-    reload()
+  const onBackgroundContextMenu = (e: React.MouseEvent) => {
+    if ((e.target as HTMLElement).closest('[data-row]')) return
+    e.preventDefault()
+    setMenu({ x: e.clientX, y: e.clientY, path: '', isDir: false, background: true })
   }
 
   useEffect(() => {
     if (!menu) return
     const close = () => setMenu(null)
+    const esc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') close()
+    }
     window.addEventListener('click', close)
-    return () => window.removeEventListener('click', close)
+    window.addEventListener('keydown', esc)
+    return () => {
+      window.removeEventListener('click', close)
+      window.removeEventListener('keydown', esc)
+    }
   }, [menu])
 
   return (
     <>
       <div className="tree-toolbar">
-        <button className="icon-btn" title="Nouveau fichier" onClick={() => doNewFile(parentDirOf(selectedId))}>
+        <button
+          className="icon-btn"
+          title="Nouveau fichier"
+          onClick={() => beginCreate('file', parentDirOf(selectedId))}
+        >
           ＋
         </button>
-        <button className="icon-btn" title="Nouveau dossier" onClick={() => doNewFolder(parentDirOf(selectedId))}>
+        <button
+          className="icon-btn"
+          title="Nouveau dossier"
+          onClick={() => beginCreate('dir', parentDirOf(selectedId))}
+        >
           ▤
         </button>
         <input {...getInputProps()} />
@@ -204,12 +333,17 @@ export default function FileTree({ ws, onOpen }: Props) {
         </button>
       </div>
       <div
-        {...getRootProps({ className: 'tree-scroll' + (isDragActive ? ' drag-over' : '') })}
+        {...getRootProps({
+          className: 'tree-scroll' + (isDragActive ? ' drag-over' : '')
+        })}
         ref={wrapRef}
+        onKeyDown={onTreeKeyDown}
+        onContextMenu={onBackgroundContextMenu}
       >
         {size.h > 50 && (
           <RowExtrasContext.Provider value={{ selectedId, setSelectedId, onOpen, setMenu }}>
             <Tree
+              ref={treeRef}
               data={nodes}
               width={size.w}
               height={size.h}
@@ -217,6 +351,9 @@ export default function FileTree({ ws, onOpen }: Props) {
               indent={14}
               openByDefault={false}
               initialOpenState={Object.fromEntries(nodes.filter(n => n.type === 'dir').map(n => [n.id, true]))}
+              onRename={handleRename}
+              disableDrag
+              disableDrop
             >
               {RowView}
             </Tree>
@@ -225,24 +362,35 @@ export default function FileTree({ ws, onOpen }: Props) {
         {uploading && <div className="tree-uploading">Upload en cours…</div>}
       </div>
       {menu && (
-        <div className="tree-context" style={{ left: menu.x, top: menu.y }}>
-          {menu.isDir ? (
+        <div className="tree-context" style={{ left: menu.x, top: menu.y }} onClick={e => e.stopPropagation()}>
+          {menu.background ? (
             <>
-              <button onClick={() => doNewFile(menu.path)}>Nouveau fichier ici</button>
-              <button onClick={() => doNewFolder(menu.path)}>Nouveau dossier ici</button>
-              <button onClick={() => pickInto(menu.path)}>Uploader ici</button>
+              <button onClick={() => beginCreate('file', '')}>Nouveau fichier</button>
+              <button onClick={() => beginCreate('dir', '')}>Nouveau dossier</button>
+              <button onClick={() => pickInto('')}>Uploader ici</button>
+            </>
+          ) : menu.isDir ? (
+            <>
+              <button onClick={() => beginCreate('file', menu!.path)}>Nouveau fichier ici</button>
+              <button onClick={() => beginCreate('dir', menu!.path)}>Nouveau dossier ici</button>
+              <button onClick={() => pickInto(menu!.path)}>Uploader ici</button>
+              <div className="sep" />
+              <button onClick={() => beginRename(menu!.path)}>Renommer</button>
+              <button className="danger" onClick={() => requestDelete(menu!.path)}>
+                Supprimer
+              </button>
             </>
           ) : (
             <>
               <a href={downloadUrl(ws, menu.path)} download>
                 Télécharger
               </a>
+              <button onClick={() => beginRename(menu!.path)}>Renommer</button>
+              <button className="danger" onClick={() => requestDelete(menu!.path)}>
+                Supprimer
+              </button>
             </>
           )}
-          <button onClick={() => doRename(menu.path)}>Renommer</button>
-          <button onClick={() => doDelete(menu.path)} style={{ color: 'var(--danger)' }}>
-            Supprimer
-          </button>
         </div>
       )}
     </>
@@ -263,9 +411,19 @@ function RowView({ node, style, dragHandle }: any) {
   const n: NodeApi<TreeNode> = node
   const data = n.data
   const isSelected = selectedId === data.id
+  const editing = n.isEditing
+  const inputRef = useRef<HTMLInputElement | null>(null)
+
+  useEffect(() => {
+    if (!editing) return
+    inputRef.current?.focus()
+    inputRef.current?.select()
+  }, [editing])
+
   return (
     <div
       ref={dragHandle}
+      data-row="1"
       style={{
         ...style,
         display: 'flex',
@@ -273,26 +431,52 @@ function RowView({ node, style, dragHandle }: any) {
         gap: 5,
         paddingLeft: 4,
         borderRadius: 5,
-        cursor: 'pointer',
+        cursor: editing ? 'default' : 'pointer',
         background: isSelected ? 'var(--accent-soft)' : undefined,
         color: isSelected ? 'var(--text)' : undefined
       }}
-      title={data.path}
+      title={editing ? undefined : data.path}
       onClick={() => {
+        if (editing) return
         setSelectedId(data.id)
         if (n.isInternal) n.toggle()
         else onOpen(data.path)
       }}
       onContextMenu={e => {
         e.preventDefault()
+        e.stopPropagation()
+        if (editing) return
         setSelectedId(data.id)
         setMenu({ x: e.clientX, y: e.clientY, path: data.path, isDir: n.isInternal })
       }}
     >
-      <span style={{ color: 'var(--muted)', fontSize: 10, width: 10, textAlign: 'center' }}>
-        {n.isInternal ? (n.isOpen ? '▾' : '▸') : ''}
-      </span>
-      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{data.name}</span>
+      {!editing && (
+        <span style={{ color: 'var(--muted)', fontSize: 10, width: 10, textAlign: 'center' }}>
+          {n.isInternal ? (n.isOpen ? '▾' : '▸') : ''}
+        </span>
+      )}
+      {editing ? (
+        <input
+          ref={inputRef}
+          className="tree-edit-input"
+          defaultValue={data.name}
+          spellCheck={false}
+          draggable={false}
+          onClick={e => e.stopPropagation()}
+          onKeyDown={e => {
+            if (e.key === 'Enter') {
+              e.preventDefault()
+              n.submit(e.currentTarget.value)
+            } else if (e.key === 'Escape') {
+              e.preventDefault()
+              n.reset()
+            }
+          }}
+          onBlur={() => n.reset()}
+        />
+      ) : (
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{data.name}</span>
+      )}
     </div>
   )
 }

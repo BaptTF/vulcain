@@ -168,6 +168,26 @@ button, input, textarea, select {
   cursor: pointer;
 }
 .tree-context button:hover { background: var(--accent-soft); }
+.tree-context button.danger { color: var(--danger); }
+.tree-context .sep {
+  height: 1px;
+  margin: 4px 2px;
+  background: var(--border);
+}
+
+.tree-edit-input {
+  flex: 1;
+  min-width: 0;
+  height: 18px;
+  padding: 0 4px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  outline: none;
+}
 
 .panel-center {
   height: 100%;
