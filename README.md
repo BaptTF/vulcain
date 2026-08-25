@@ -47,8 +47,15 @@ Source de vérité unique. Le bouton **Config** de la topbar ouvre ce dossier co
 | `configWorkspace` | chemin du dossier ouvert par le bouton Config |
 | `llm.provider` | génère `~/.pi/agent/models.json` au boot (baseUrl/api/apiKey/models) |
 | `agent.command` | commande ACP spawnée par session chat, cwd = racine du workspace. Remplaçable par n'importe quel agent ACP (ex. `["npx","-y","@zed-industries/claude-agent-acp"]`) |
+| `agent.systemPrompt` | chemin vers le `SYSTEM.md` du système (défaut : `<configWorkspace>/SYSTEM.md`). Synchronisé vers `~/.pi/agent/SYSTEM.md` au boot et à chaque connexion chat, pour remplacer le system prompt par défaut « coding agent » de pi |
 | `tools.camofox` | URL REST du navigateur stealth + accessKey optionnelle |
 | `tools.webSearch` | provider de recherche (`camofox-macro` avec `@google_search` par défaut) |
+
+## System prompt du chat
+
+Par défaut pi se comporte en agent de codage. Pour en faire un assistant général (recherche web, vérification de faits, rédaction…), un `SYSTEM.md` vit dans le dossier config (`~/.vulcain/config/SYSTEM.md`, créé par le bootstrap s'il n'existe pas). Son contenu **remplace** le system prompt par défaut de pi (les outils, skills et contextes restent ajoutés par pi après).
+
+Le chemin de ce fichier est configurable via `agent.systemPrompt` dans `config.json`. Le serveur le synchronise vers `~/.pi/agent/SYSTEM.md` (emplacement global lu par pi) au démarrage et à chaque connexion chat. Supprimer le fichier (ou retirer `agent.systemPrompt`) rétablit le comportement par défaut de pi.
 
 ## Skills
 
@@ -83,6 +90,6 @@ Le navigateur ne peut pas spawner de processus : le pont WS⇄stdio est donc in�
 ```bash
 VULCAIN_HOME=/tmp/vulcain-test node scripts/bootstrap.mjs
 # pointer cfg.agent.command vers ["node", "<repo>/test/fake-agent.mjs"]
-VULCAIN_HOME=/tmp/vulcain-test VULCAIN_PORT=7391 node server/dist/index.js &
-node test/e2e.mjs   # 8 checks : watch + initialize/session/prompt/streaming/tool_call
+VULCAIN_HOME=/tmp/vulcain-test PI_CODING_AGENT_DIR=/tmp/vulcain-test-pi VULCAIN_PORT=7391 node server/dist/index.js &
+PI_CODING_AGENT_DIR=/tmp/vulcain-test-pi node test/e2e.mjs   # 9 checks : watch + initialize/session/prompt/streaming/tool_call + sync SYSTEM.md
 ```

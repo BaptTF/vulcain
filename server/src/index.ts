@@ -7,7 +7,7 @@ import { loadConfig } from './config.js'
 import { registerFsApi } from './fs-api.js'
 import { registerWatchApi } from './watch.js'
 import { registerAcpBridge } from './acp-bridge.js'
-import { syncPiModels } from './pisync.js'
+import { syncPiModels, syncSystemPrompt } from './pisync.js'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const webDist = path.resolve(here, '../../web/dist')
@@ -16,6 +16,8 @@ async function main(): Promise<void> {
   const cfg = loadConfig()
   const modelsFile = syncPiModels(cfg)
   if (modelsFile) console.log(`[vulcain] synced pi models -> ${modelsFile}`)
+  const systemPromptFile = syncSystemPrompt(cfg)
+  if (systemPromptFile) console.log(`[vulcain] synced system prompt -> ${systemPromptFile}`)
 
   const app = Fastify({ logger: false, bodyLimit: 64 * 1024 * 1024 })
 

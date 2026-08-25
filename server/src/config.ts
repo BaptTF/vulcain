@@ -13,7 +13,7 @@ export interface VulcainConfig {
   workspaces: WorkspaceDef[]
   configWorkspace: string
   llm?: { provider?: Record<string, unknown> }
-  agent: { command: string[]; args?: string[] }
+  agent: { command: string[]; args?: string[]; systemPrompt?: string }
   tools: {
     camofox?: { baseUrl: string; accessKey?: string }
     webSearch?: { provider?: string; macro?: string }
@@ -37,13 +37,28 @@ const DEFAULTS: VulcainConfig = {
   tools: {}
 }
 
+function defaultSystemPromptPath(configWorkspace: string): string {
+  return path.join(expandHome(configWorkspace), 'SYSTEM.md')
+}
+
 export function loadConfig(): VulcainConfig {
   const p = configPath()
   let raw: any = {}
   if (fs.existsSync(p)) {
     raw = JSON.parse(fs.readFileSync(p, 'utf8'))
   }
-  return { ...DEFAULTS, ...raw, server: { ...DEFAULTS.server, ...(raw.server ?? {}) } }
+  const configWorkspace = raw.configWorkspace ?? DEFAULTS.configWorkspace
+  const agent = { ...DEFAULTS.agent, ...(raw.agent ?? {}) }
+  if (agent.systemPrompt === undefined) {
+    agent.systemPrompt = defaultSystemPromptPath(configWorkspace)
+  }
+  return {
+    ...DEFAULTS,
+    ...raw,
+    configWorkspace,
+    agent,
+    server: { ...DEFAULTS.server, ...(raw.server ?? {}) }
+  }
 }
 
 export function saveConfig(cfg: VulcainConfig): void {

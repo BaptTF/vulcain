@@ -102,6 +102,16 @@ await withTimeout(new Promise(r => acp.once('open', r)), 5000, 'acp open')
 check('acp: websocket opened', true)
 await new Promise(r => setTimeout(r, 400))
 
+// the bridge syncs the configured SYSTEM.md into pi's agent dir on connect
+{
+  const { default: fs } = await import('node:fs')
+  const { default: os } = await import('node:os')
+  const { default: path } = await import('node:path')
+  const agentDir = process.env.PI_CODING_AGENT_DIR || path.join(os.homedir(), '.pi', 'agent')
+  const sp = path.join(agentDir, 'SYSTEM.md')
+  check('acp: SYSTEM.md synced to pi agent dir', fs.existsSync(sp))
+}
+
 const init = await withTimeout(rpc('initialize', { protocolVersion: 1, clientCapabilities: {} }), 5000, 'init')
 check('acp: initialize -> fake-agent', init.result?.agentInfo?.name === 'fake-agent')
 

@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process'
 import type { FastifyInstance } from 'fastify'
 import { findWorkspace, loadConfig } from './config.js'
+import { syncSystemPrompt } from './pisync.js'
 
 export function registerAcpBridge(app: FastifyInstance): void {
   app.get('/api/acp', { websocket: true }, (sock, req) => {
@@ -11,6 +12,8 @@ export function registerAcpBridge(app: FastifyInstance): void {
       sock.close(4004, 'unknown workspace')
       return
     }
+
+    syncSystemPrompt(cfg)
 
     const command = cfg.agent.command
     const args = [...command.slice(1), ...(cfg.agent.args ?? [])]

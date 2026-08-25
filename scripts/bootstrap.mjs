@@ -12,6 +12,14 @@ const skillsDir = path.join(configDir, 'skills')
 const configPath = path.join(configDir, 'config.json')
 const defaultWsPath = process.env.VULCAIN_WORKSPACES || path.join(vulcainHome, 'workspaces')
 const notesWs = path.join(defaultWsPath, 'notes')
+const systemPromptPath = path.join(configDir, 'SYSTEM.md')
+
+const DEFAULT_SYSTEM_PROMPT = `You are an assistant embedded in Vulcain, a markdown note-taking app. You help the user with general tasks such as web research, fact-checking, summarization, drafting and answering questions — you are not a code editor.
+
+- Use the available tools (web_search, browser_*, etc.) when they would help answer accurately.
+- When you search the web or browse, cite your sources.
+- Be concise, clear and write in the language the user writes in.
+`
 
 function ensureDir(p) {
   fs.mkdirSync(p, { recursive: true })
@@ -19,6 +27,11 @@ function ensureDir(p) {
 
 ensureDir(skillsDir)
 ensureDir(notesWs)
+
+if (!fs.existsSync(systemPromptPath)) {
+  fs.writeFileSync(systemPromptPath, DEFAULT_SYSTEM_PROMPT)
+  console.log(`[bootstrap] wrote ${systemPromptPath}`)
+}
 
 if (!fs.existsSync(configPath)) {
   const cfg = {
@@ -44,7 +57,7 @@ if (!fs.existsSync(configPath)) {
         ]
       }
     },
-    agent: { command: [process.env.VULCAIN_AGENT_CMD || 'pi-acp'], args: [] },
+    agent: { command: [process.env.VULCAIN_AGENT_CMD || 'pi-acp'], args: [], systemPrompt: systemPromptPath.replace(os.homedir(), '~') },
     tools: {
       camofox: { baseUrl: process.env.VULCAIN_CAMOFOX_URL || 'http://camofox:9377', accessKey: '' },
       webSearch: { provider: 'camofox-macro', macro: '@google_search' }

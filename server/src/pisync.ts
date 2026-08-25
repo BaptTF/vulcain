@@ -1,7 +1,27 @@
 import os from 'node:os'
 import fs from 'node:fs'
 import path from 'node:path'
-import type { VulcainConfig } from './config.js'
+import { expandHome, type VulcainConfig } from './config.js'
+
+function piAgentDir(): string {
+  return process.env.PI_CODING_AGENT_DIR || path.join(os.homedir(), '.pi', 'agent')
+}
+
+/**
+ * Copy the configurable system prompt (SYSTEM.md) into pi's global agent dir,
+ * where pi reads it to replace its default system prompt. Skips if the source
+ * file is missing.
+ */
+export function syncSystemPrompt(cfg: VulcainConfig): string | undefined {
+  const src = cfg.agent.systemPrompt ? expandHome(cfg.agent.systemPrompt) : undefined
+  if (!src || !fs.existsSync(src)) return undefined
+
+  const dir = piAgentDir()
+  fs.mkdirSync(dir, { recursive: true })
+  const file = path.join(dir, 'SYSTEM.md')
+  fs.copyFileSync(src, file)
+  return file
+}
 
 export function syncPiModels(cfg: VulcainConfig): string | undefined {
   const provider = cfg.llm?.provider as
@@ -9,7 +29,7 @@ export function syncPiModels(cfg: VulcainConfig): string | undefined {
     | undefined
   if (!provider || !provider.baseUrl || !provider.api) return undefined
 
-  const dir = process.env.PI_CODING_AGENT_DIR || path.join(os.homedir(), '.pi', 'agent')
+  const dir = piAgentDir()
   fs.mkdirSync(dir, { recursive: true })
 
   const name = provider.name ?? 'custom'

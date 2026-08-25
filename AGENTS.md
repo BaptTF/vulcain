@@ -43,8 +43,8 @@ The e2e test suite requires a running server:
 ```bash
 VULCAIN_HOME=/tmp/vulcain-test node scripts/bootstrap.mjs
 # point cfg.agent.command toward ["node", "<repo>/test/fake-agent.mjs"]
-VULCAIN_HOME=/tmp/vulcain-test VULCAIN_PORT=7391 node server/dist/index.js &
-node test/e2e.mjs        # 8 checks: watch + initialize/session/prompt/streaming/tool_call
+VULCAIN_HOME=/tmp/vulcain-test PI_CODING_AGENT_DIR=/tmp/vulcain-test-pi VULCAIN_PORT=7391 node server/dist/index.js &
+PI_CODING_AGENT_DIR=/tmp/vulcain-test-pi node test/e2e.mjs   # 9 checks: watch + initialize/session/prompt/streaming/tool_call + SYSTEM.md sync
 ```
 
 ### UI tests (`test/ui/ui.spec.mjs`)
@@ -91,6 +91,6 @@ These rules apply to every contribution. Violations are treated as review blocke
 ## Conventions
 
 - **No new processes from the browser**: the browser cannot spawn processes, so the WS⇄stdio bridge is unavoidable — keep it intentionally stupid (it never parses the ACP protocol; all protocol logic lives in `web/src/acp.ts`).
-- **Config is the single source of truth**: `~/.vulcain/config.json`. Server only touches configured workspace roots plus the config workspace.
-- **Environment**: `VULCAIN_HOME` and `VULCAIN_PORT` override the home dir and port for isolated test runs.
+- **Config is the single source of truth**: `~/.vulcain/config.json`. Server only touches configured workspace roots plus the config workspace. `agent.systemPrompt` (path to a `SYSTEM.md`, default `<configWorkspace>/SYSTEM.md`) is synced to `~/.pi/agent/SYSTEM.md` at boot and on each ACP connect so pi replaces its default coding-agent prompt for the chat.
+- **Environment**: `VULCAIN_HOME`, `VULCAIN_PORT`, `PI_CODING_AGENT_DIR` and `VULCAIN_WORKSPACES` override the home dir, port, pi agent dir and workspace root for isolated test runs.
 - **TypeScript** across the repo; frontend ships typed ACP subset in `web/src/acp.ts`.
