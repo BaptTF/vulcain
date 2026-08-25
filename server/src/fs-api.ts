@@ -10,7 +10,7 @@ import {
   loadConfig,
   resolveInWorkspace,
   saveConfig,
-  vulcainHome
+  tildePath
 } from './config.js'
 
 const BINARY_EXT = new Set([
@@ -28,18 +28,26 @@ function workspace(name: string | undefined) {
   return ws
 }
 
+function isSandboxed(): boolean {
+  return Boolean(process.env.VULCAIN_WORKSPACES)
+}
+
 function browseRoot(): string {
-  const raw = process.env.VULCAIN_WORKSPACES || path.join(vulcainHome(), 'workspaces')
+  const raw = process.env.VULCAIN_WORKSPACES || os.homedir()
   return path.resolve(expandHome(raw))
 }
 
 function resolveBrowse(rel: string): { root: string; abs: string } {
   const root = browseRoot()
   const abs = path.resolve(root, rel ?? '')
-  if (abs !== root && !abs.startsWith(root + path.sep)) {
+  if (isSandboxed() && !abs.startsWith(root + path.sep) && abs !== root) {
     throw new Error('path escapes browse root')
   }
   return { root, abs }
+}
+
+function topOf(abs: string): string {
+  return isSandboxed() ? browseRoot() : path.parse(abs).root
 }
 
 async function listDirs(abs: string): Promise<{ name: string; type: 'dir' }[]> {
@@ -91,7 +99,7 @@ export function registerFsApi(app: FastifyInstance): void {
     const cfg = loadConfig()
     return {
       theme: cfg.theme,
-      workspaces: allWorkspaces(cfg).map(w => ({ name: w.name })),
+      workspaces: allWorkspaces(cfg).map(w => ({ name: w.name, root: tildePath(w.root) })),
       defaultWorkspace: cfg.workspaces[0]?.name ?? '__config__'
     }
   })
@@ -149,26 +157,46 @@ export function registerFsApi(app: FastifyInstance): void {
   app.get('/api/fs/browse', async (req) => {
     const q = req.query as { path?: string }
     const { root, abs } = resolveBrowse(q.path ?? '')
-    await fsp.mkdir(root, { recursive: true })
+    if (isSandboxed()) await fsp.mkdir(root, { recursive: true })
     const entries = await listDirs(abs)
+    const top = topOf(abs)
     return {
       root,
       path: path.relative(root, abs).split(path.sep).join('/'),
-      entries
+      abs,
+      entries,
+      isAtRoot: abs === top,
+      sandboxed: isSandboxed()
     }
   })
 
   app.post('/api/workspaces', async (req) => {
     const body = req.body as { name?: string; path?: string }
-    const name = (body.name ?? '').trim()
-    const rel = body.path ?? ''
-    if (!name || /[\\/:*?"<>|]/.test(name)) throw new Error('nom de workspace invalide')
-    const { root, abs } = resolveBrowse(rel)
-    const st = await fsp.stat(abs).catch(() => null)
+    const rawPath = (body.path ?? '').trim()
+    if (!rawPath) throw new Error('chemin requis')
+    let candidate = expandHome(rawPath)
+    if (!path.isAbsolute(candidate)) candidate = path.resolve(browseRoot(), candidate)
+    candidate = path.resolve(candidate)
+    if (isSandboxed() && !candidate.startsWith(browseRoot() + path.sep) && candidate !== browseRoot()) {
+      throw new Error('path escapes browse root')
+    }
+    const st = await fsp.stat(candidate).catch(() => null)
     if (!st?.isDirectory()) throw new Error('dossier introuvable')
+    let name = (body.name ?? '').trim()
+    if (!name) {
+      const base = path.basename(candidate)
+      if (!base || /[\\/:*?"<>|]/.test(base)) throw new Error('impossible de dériver un nom du dossier')
+      name = base
+    }
+    if (/[\\/:*?"<>|]/.test(name)) throw new Error('nom de workspace invalide')
+    if (name === '__config__') throw new Error('nom de workspace réservé')
     const cfg = loadConfig()
     if (cfg.workspaces.some(w => w.name === name)) throw new Error(`workspace déjà existant : ${name}`)
-    cfg.workspaces.push({ name, path: abs === root ? root.replace(os.homedir(), '~') : abs.replace(os.homedir(), '~') })
+    const norm = (p: string) => path.resolve(expandHome(p))
+    if (cfg.workspaces.some(w => norm(w.path) === candidate)) {
+      throw new Error('un workspace pointe déjà vers ce dossier')
+    }
+    cfg.workspaces.push({ name, path: tildePath(candidate) })
     saveConfig(cfg)
     return { ok: true, name }
   })

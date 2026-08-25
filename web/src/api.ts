@@ -1,6 +1,6 @@
 export interface Meta {
   theme: 'dark' | 'light'
-  workspaces: { name: string }[]
+  workspaces: { name: string; root?: string }[]
   defaultWorkspace: string
 }
 
@@ -90,8 +90,11 @@ export interface BrowseEntry {
 
 export interface BrowseResult {
   root: string
+  abs: string
   path: string
   entries: BrowseEntry[]
+  isAtRoot: boolean
+  sandboxed: boolean
 }
 
 export function browse(path: string): Promise<BrowseResult> {

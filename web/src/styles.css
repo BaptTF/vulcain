@@ -593,15 +593,33 @@ button, input, textarea, select {
 
 .ws-open {
   flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 1px;
   text-align: left;
   background: none;
   border: none;
   color: var(--text);
-  padding: 6px 8px;
+  padding: 5px 8px;
   border-radius: 6px;
   cursor: pointer;
 }
 .ws-open:hover { background: var(--accent-soft); }
+.ws-item-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ws-item-path {
+  font-size: 11px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ws-nav {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
 
 .ws-browser {
   display: flex;
@@ -643,7 +661,19 @@ button, input, textarea, select {
   cursor: pointer;
 }
 .ws-dir:hover { background: var(--accent-soft); }
+.ws-dir.selected {
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
 .ws-empty { color: var(--muted); font-size: 12px; padding: 4px 8px; }
+
+.ws-target {
+  font-size: 12px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 .ws-error {
   color: var(--danger);

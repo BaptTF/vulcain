@@ -19,6 +19,7 @@ export default function App() {
       setMeta(m)
       if (!localStorage.getItem('vulcain.ws')) {
         setActiveWs(m.defaultWorkspace)
+        if (m.defaultWorkspace === '__config__') setWsModalOpen(true)
       }
     })
   }, [])
