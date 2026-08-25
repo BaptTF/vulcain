@@ -58,6 +58,13 @@ export function expandHome(p: string): string {
   return p
 }
 
+export function tildePath(p: string): string {
+  const home = os.homedir()
+  if (p === home) return '~'
+  if (p.startsWith(home + path.sep)) return '~' + p.slice(home.length)
+  return p
+}
+
 export interface ResolvedWorkspace {
   name: string
   root: string

@@ -83,9 +83,6 @@ export default function App() {
         </button>
         <div className="spacer" />
         {isConfigWs && <span style={{ color: 'var(--muted)' }}>workspace configuration globale</span>}
-        <button className="btn" onClick={() => setWsModalOpen(true)} title="Ouvrir la config globale">
-          Config
-        </button>
         <button className="btn" onClick={toggleTheme} title="Basculer le theme">
           {meta?.theme === 'light' ? 'Dark' : 'Light'}
         </button>
