@@ -142,7 +142,7 @@ await paneToggle('Agent').click()
 await page.waitForTimeout(300)
 check('agent panel reappears when toggled on', await boxVisible('.panel-chat'))
 
-// guard: cannot collapse the last visible main pane (editor/preview/agent)
+// all main panes can be collapsed (no last-pane guard) — single-pane or empty layout allowed
 await paneToggle('Preview').click()
 await page.waitForTimeout(300)
 await paneToggle('Agent').click()
@@ -152,12 +152,18 @@ check('agent toggled off', await paneToggle('Agent').evaluate(el => !el.classLis
 check('editor stays active with others off', await paneToggle('Editor').evaluate(el => el.classList.contains('active')))
 await paneToggle('Editor').click()
 await page.waitForTimeout(300)
-check('guard blocks collapsing the last main pane', await paneToggle('Editor').evaluate(el => el.classList.contains('active')))
+check('editor can be collapsed with no main pane left', await paneToggle('Editor').evaluate(el => !el.classList.contains('active')))
+// even the tree can be collapsed when nothing else is open
+await paneToggle('Tree').click()
+await page.waitForTimeout(300)
+check('tree can be collapsed with all main panes off', await paneToggle('Tree').evaluate(el => !el.classList.contains('active')))
 // restore all panes
+await paneToggle('Tree').click()
+await paneToggle('Editor').click()
 await paneToggle('Preview').click()
 await paneToggle('Agent').click()
 await page.waitForTimeout(300)
-check('panes restored', (await boxVisible('.panel-preview')) && (await boxVisible('.panel-chat')))
+check('panes restored', (await boxVisible('.panel-preview')) && (await boxVisible('.panel-chat')) && (await boxVisible('.cm-editor')))
 
 // --- layout persists across reload ---
 await paneToggle('Agent').click()

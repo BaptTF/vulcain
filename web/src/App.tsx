@@ -14,7 +14,6 @@ import WorkspaceModal from './components/WorkspaceModal'
 import WorkspaceSwitcher from './components/WorkspaceSwitcher'
 
 type PaneId = 'tree' | 'editor' | 'preview' | 'agent'
-const MAIN_PANES: PaneId[] = ['editor', 'preview', 'agent']
 
 export default function App() {
   const [meta, setMeta] = useState<Meta | null>(null)
@@ -49,14 +48,9 @@ export default function App() {
   }, [])
 
   const togglePane = useCallback((id: PaneId) => {
-    const ref = paneRefs[id]
-    const open = !ref.current?.isCollapsed()
-    if (open && MAIN_PANES.includes(id)) {
-      const othersOpen = MAIN_PANES.some(other => other !== id && !paneRefs[other].current?.isCollapsed())
-      if (!othersOpen) return
-    }
-    if (open) ref.current?.collapse()
-    else ref.current?.expand()
+    const panel = paneRefs[id].current
+    if (panel?.isCollapsed()) panel.expand()
+    else panel?.collapse()
   }, [paneRefs])
 
   const tabsKey = (ws: string) => `vulcain.tabs.${ws}`
