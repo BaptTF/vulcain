@@ -215,6 +215,8 @@ export function registerFsApi(app: FastifyInstance): void {
     const body = req.body as { ws?: string; path?: string; content?: string; contentBase64?: string }
     const ws = workspace(body.ws)
     const abs = resolveInWorkspace(ws, body.path ?? '')
+    const st = await fsp.stat(abs).catch(() => null)
+    if (st?.isDirectory()) throw new Error(`un dossier porte déjà ce nom : ${body.path}`)
     await fsp.mkdir(path.dirname(abs), { recursive: true })
     if (body.contentBase64 !== undefined) {
       await fsp.writeFile(abs, Buffer.from(body.contentBase64, 'base64'))
@@ -227,7 +229,10 @@ export function registerFsApi(app: FastifyInstance): void {
   app.post('/api/fs/mkdir', async (req) => {
     const body = req.body as { ws?: string; path?: string }
     const ws = workspace(body.ws)
-    await fsp.mkdir(resolveInWorkspace(ws, body.path ?? ''), { recursive: true })
+    const abs = resolveInWorkspace(ws, body.path ?? '')
+    const st = await fsp.stat(abs).catch(() => null)
+    if (st?.isFile()) throw new Error(`un fichier porte déjà ce nom : ${body.path}`)
+    await fsp.mkdir(abs, { recursive: true })
     return { ok: true }
   })
 
@@ -236,7 +241,9 @@ export function registerFsApi(app: FastifyInstance): void {
     const ws = workspace(body.ws)
     const abs = resolveInWorkspace(ws, body.path ?? '')
     await fsp.mkdir(path.dirname(abs), { recursive: true })
-    if (!fs.existsSync(abs)) await fsp.writeFile(abs, '', 'utf8')
+    const st = await fsp.stat(abs).catch(() => null)
+    if (st?.isDirectory()) throw new Error(`un dossier porte déjà ce nom : ${body.path}`)
+    if (!st?.isFile()) await fsp.writeFile(abs, '', 'utf8')
     return { ok: true }
   })
 

@@ -17,6 +17,32 @@ async function withTimeout(p, ms, label) {
 
 await new Promise(resolve => setTimeout(resolve, 300))
 
+const { default: http } = await import('node:http')
+function reqJson(method, path, body) {
+  return new Promise((resolve, reject) => {
+    const r = http.request(
+      { host: '127.0.0.1', port: PORT, path, method, agent: false, headers: { 'content-type': 'application/json' } },
+      res => {
+        let data = ''
+        res.on('data', c => (data += c))
+        res.on('end', () => resolve({ status: res.statusCode, body: JSON.parse(data || '{}') }))
+      }
+    )
+    r.on('error', reject)
+    r.end(JSON.stringify(body))
+  })
+}
+
+const clashDir = `__clash_dir_${Date.now()}`
+await reqJson('POST', '/api/fs/mkdir', { ws: 'Notes', path: clashDir })
+const touchClash = await reqJson('POST', '/api/fs/touch', { ws: 'Notes', path: clashDir })
+check('fs: touch on existing dir gives clear error', touchClash.status === 500 && /dossier porte déjà ce nom/.test(touchClash.body.error ?? ''))
+
+const clashFile = `__clash_file_${Date.now()}`
+await reqJson('PUT', '/api/fs/file', { ws: 'Notes', path: clashFile, content: 'x' })
+const mkdirClash = await reqJson('POST', '/api/fs/mkdir', { ws: 'Notes', path: clashFile })
+check('fs: mkdir on existing file gives clear error', mkdirClash.status === 500 && /fichier porte déjà ce nom/.test(mkdirClash.body.error ?? ''))
+
 const watch = new WebSocket(`ws://127.0.0.1:${PORT}/api/watch?ws=Notes`)
 let watchOpen = false
 watch.on('open', () => {
