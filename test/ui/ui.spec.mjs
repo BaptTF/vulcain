@@ -125,6 +125,12 @@ const boxVisible = async sel => {
   if (!(await el.count())) return false
   return await el.evaluate(n => n.getBoundingClientRect().width > 4)
 }
+// a panel is "hidden" when its [data-panel] element is collapsed to zero width
+const panelHidden = async id => {
+  const el = page.locator(`[data-testid="${id}"]`).first()
+  if (!(await el.count())) return true
+  return !(await el.evaluate(n => n.getBoundingClientRect().width > 4))
+}
 check('viewbar shows 4 pane toggles', (await page.locator('.viewbar .pane-toggle').count()) === 4)
 check(
   'all main panes visible by default',
@@ -136,7 +142,7 @@ check(
 // toggle agent off and back on
 await paneToggle('Agent').click()
 await page.waitForTimeout(300)
-check('agent panel hidden when toggled off', !(await boxVisible('.panel-chat')))
+check('agent panel hidden when toggled off', await panelHidden('agent'))
 check('agent toggle reflects hidden state', await paneToggle('Agent').evaluate(el => !el.classList.contains('active')))
 await paneToggle('Agent').click()
 await page.waitForTimeout(300)
@@ -150,27 +156,41 @@ await page.waitForTimeout(300)
 check('preview toggled off', await paneToggle('Preview').evaluate(el => !el.classList.contains('active')))
 check('agent toggled off', await paneToggle('Agent').evaluate(el => !el.classList.contains('active')))
 check('editor stays active with others off', await paneToggle('Editor').evaluate(el => el.classList.contains('active')))
+check('preview panel hidden when toggled off', await panelHidden('preview'))
+// collapse editor too: with both inner panes off, the whole center (tabbar + editor) hides
 await paneToggle('Editor').click()
 await page.waitForTimeout(300)
 check('editor can be collapsed with no main pane left', await paneToggle('Editor').evaluate(el => !el.classList.contains('active')))
+check('editor hidden when toggled off', await panelHidden('editor'))
+check('center hidden when editor+preview are off', await panelHidden('center'))
 // even the tree can be collapsed when nothing else is open
 await paneToggle('Tree').click()
 await page.waitForTimeout(300)
 check('tree can be collapsed with all main panes off', await paneToggle('Tree').evaluate(el => !el.classList.contains('active')))
+check(
+  'nothing visible when all panes collapsed',
+  (await panelHidden('tree')) && (await panelHidden('center')) && (await panelHidden('agent'))
+)
 // restore all panes
 await paneToggle('Tree').click()
 await paneToggle('Editor').click()
 await paneToggle('Preview').click()
 await paneToggle('Agent').click()
 await page.waitForTimeout(300)
-check('panes restored', (await boxVisible('.panel-preview')) && (await boxVisible('.panel-chat')) && (await boxVisible('.cm-editor')))
+check(
+  'panes restored',
+  (await boxVisible('.panel-preview')) &&
+    (await boxVisible('.panel-chat')) &&
+    (await boxVisible('.cm-editor')) &&
+    (await boxVisible('.panel-center'))
+)
 
 // --- layout persists across reload ---
 await paneToggle('Agent').click()
 await page.waitForTimeout(300)
 await page.reload({ waitUntil: 'domcontentloaded' })
 await page.waitForTimeout(1500)
-check('collapsed agent stays collapsed after reload', !(await boxVisible('.panel-chat')))
+check('collapsed agent stays collapsed after reload', await panelHidden('agent'))
 await paneToggle('Agent').click()
 await page.waitForTimeout(300)
 check('agent expandable after reload', await boxVisible('.panel-chat'))

@@ -533,19 +533,16 @@ button, input, textarea, select {
 }
 .chat-input:focus { border-color: var(--accent); }
 
-[data-panel-resize-handle-enabled] {
-  transition: background 0.15s;
-}
-[data-panel-resize-handle-id]:hover,
-[data-resize-handle-active] {
-  background: var(--accent) !important;
-}
-
-[data-panel-resize-handle-id] {
+[data-separator] {
   width: 4px !important;
   min-width: 4px !important;
   margin: 0 !important;
   background: var(--border);
+  transition: background 0.15s;
+}
+[data-separator="hover"],
+[data-separator="active"] {
+  background: var(--accent) !important;
 }
 
 .tree-context a {

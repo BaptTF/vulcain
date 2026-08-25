@@ -1,10 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import {
-  Panel,
-  PanelGroup,
-  PanelResizeHandle,
-  type ImperativePanelHandle
-} from 'react-resizable-panels'
+import { Group, Panel, Separator, useDefaultLayout } from 'react-resizable-panels'
 import { Toaster } from 'sonner'
 import { getMeta, setTheme, type Meta } from './api'
 import FileTree from './components/FileTree'
@@ -26,32 +21,29 @@ export default function App() {
   const activeWsRef = useRef(activeWs)
   activeWsRef.current = activeWs
 
-  const treeRef = useRef<ImperativePanelHandle>(null)
-  const editorRef = useRef<ImperativePanelHandle>(null)
-  const previewRef = useRef<ImperativePanelHandle>(null)
-  const agentRef = useRef<ImperativePanelHandle>(null)
-  const paneRefs: Record<PaneId, React.RefObject<ImperativePanelHandle | null>> = {
-    tree: treeRef,
-    editor: editorRef,
-    preview: previewRef,
-    agent: agentRef
-  }
-  const [panes, setPanes] = useState<Record<PaneId, boolean>>({
-    tree: true,
-    editor: true,
-    preview: true,
-    agent: true
+  const [panes, setPanes] = useState<Record<PaneId, boolean>>(() => {
+    try {
+      const raw = localStorage.getItem('vulcain.panes')
+      if (raw) {
+        const saved = JSON.parse(raw)
+        if (saved && typeof saved === 'object') {
+          return { tree: true, editor: true, preview: true, agent: true, ...saved }
+        }
+      }
+    } catch {}
+    return { tree: true, editor: true, preview: true, agent: true }
   })
 
-  const setPane = useCallback((id: PaneId, open: boolean) => {
-    setPanes(prev => (prev[id] === open ? prev : { ...prev, [id]: open }))
+  const togglePane = useCallback((id: PaneId) => {
+    setPanes(prev => ({ ...prev, [id]: !prev[id] }))
   }, [])
 
-  const togglePane = useCallback((id: PaneId) => {
-    const panel = paneRefs[id].current
-    if (panel?.isCollapsed()) panel.expand()
-    else panel?.collapse()
-  }, [paneRefs])
+  const centerVisible = panes.editor || panes.preview
+  const outerPanelIds = ['tree', ...(centerVisible ? ['center'] : []), ...(panes.agent ? ['agent'] : [])]
+  const { defaultLayout: outerLayout, onLayoutChanged: onOuterLayoutChanged } = useDefaultLayout({
+    id: 'vulcain.outer',
+    panelIds: outerPanelIds
+  })
 
   const tabsKey = (ws: string) => `vulcain.tabs.${ws}`
   const readSaved = useCallback((ws: string): { tabs: string[]; active: string | null } => {
@@ -88,6 +80,12 @@ export default function App() {
   useEffect(() => {
     document.documentElement.dataset.theme = meta?.theme ?? 'dark'
   }, [meta?.theme])
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('vulcain.panes', JSON.stringify(panes))
+    } catch {}
+  }, [panes])
 
   useEffect(() => {
     if (activeWs) localStorage.setItem('vulcain.ws', activeWs)
@@ -161,7 +159,7 @@ export default function App() {
       </header>
 
       <div className="viewbar">
-        {(Object.keys(paneRefs) as PaneId[]).map(id => (
+        {(['tree', 'editor', 'preview', 'agent'] as PaneId[]).map(id => (
           <button
             key={id}
             className={`pane-toggle${panes[id] ? ' active' : ''}`}
@@ -174,50 +172,43 @@ export default function App() {
       </div>
 
       <div className="main-panels">
-        <PanelGroup direction="horizontal" autoSaveId="vulcain.outer">
-          <Panel
-            ref={treeRef}
-            collapsible
-            collapsedSize={0}
-            minSize={12}
-            defaultSize={20}
-            onCollapse={() => setPane('tree', false)}
-            onExpand={() => setPane('tree', true)}
-          >
-            <div className="panel-tree">
-              <FileTree ws={activeWs} onOpen={openFile} />
-            </div>
-          </Panel>
-          <PanelResizeHandle />
-          <Panel minSize={10}>
-            <div className="panel-center">
-              <EditorPane
-                ws={activeWs}
-                tabs={tabs}
-                activePath={activeTab}
-                onActivate={setActiveTab}
-                onClose={closeTab}
-                flushRef={flushRef}
-                editorPanelRef={editorRef}
-                previewPanelRef={previewRef}
-                onEditorCollapsed={(c) => setPane('editor', !c)}
-                onPreviewCollapsed={(c) => setPane('preview', !c)}
-              />
-            </div>
-          </Panel>
-          <PanelResizeHandle />
-          <Panel
-            ref={agentRef}
-            collapsible
-            collapsedSize={0}
-            minSize={16}
-            defaultSize={28}
-            onCollapse={() => setPane('agent', false)}
-            onExpand={() => setPane('agent', true)}
-          >
-            <Chat ws={activeWs} onOpenFile={openFile} />
-          </Panel>
-        </PanelGroup>
+        <Group
+          orientation="horizontal"
+          id="vulcain.outer"
+          defaultLayout={outerLayout}
+          onLayoutChanged={onOuterLayoutChanged}
+        >
+          {panes.tree && (
+            <Panel id="tree" minSize="12" defaultSize="20">
+              <div className="panel-tree">
+                <FileTree ws={activeWs} onOpen={openFile} />
+              </div>
+            </Panel>
+          )}
+          {panes.tree && centerVisible && <Separator />}
+          {centerVisible && (
+            <Panel id="center" minSize="10">
+              <div className="panel-center">
+                <EditorPane
+                  ws={activeWs}
+                  tabs={tabs}
+                  activePath={activeTab}
+                  onActivate={setActiveTab}
+                  onClose={closeTab}
+                  flushRef={flushRef}
+                  showEditor={panes.editor}
+                  showPreview={panes.preview}
+                />
+              </div>
+            </Panel>
+          )}
+          {centerVisible && panes.agent && <Separator />}
+          {panes.agent && (
+            <Panel id="agent" minSize="16" defaultSize="28">
+              <Chat ws={activeWs} onOpenFile={openFile} />
+            </Panel>
+          )}
+        </Group>
       </div>
       <WorkspaceModal
         open={wsModalOpen}
