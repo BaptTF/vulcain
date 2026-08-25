@@ -117,6 +117,86 @@ check(
   ((await editorText()) ?? '').includes('Bienvenue dans Vulcain') === true
 )
 
+// --- pane toggles (viewbar) ---
+const paneToggle = name => page.locator('.viewbar .pane-toggle', { hasText: name })
+// collapsed panels are rendered at zero width (flex-basis:0), so test rendered width, not CSS visibility
+const boxVisible = async sel => {
+  const el = page.locator(sel).first()
+  if (!(await el.count())) return false
+  return await el.evaluate(n => n.getBoundingClientRect().width > 4)
+}
+check('viewbar shows 4 pane toggles', (await page.locator('.viewbar .pane-toggle').count()) === 4)
+check(
+  'all main panes visible by default',
+  (await boxVisible('.panel-preview')) &&
+    (await boxVisible('.panel-chat')) &&
+    (await boxVisible('.cm-editor'))
+)
+
+// toggle agent off and back on
+await paneToggle('Agent').click()
+await page.waitForTimeout(300)
+check('agent panel hidden when toggled off', !(await boxVisible('.panel-chat')))
+check('agent toggle reflects hidden state', await paneToggle('Agent').evaluate(el => !el.classList.contains('active')))
+await paneToggle('Agent').click()
+await page.waitForTimeout(300)
+check('agent panel reappears when toggled on', await boxVisible('.panel-chat'))
+
+// guard: cannot collapse the last visible main pane (editor/preview/agent)
+await paneToggle('Preview').click()
+await page.waitForTimeout(300)
+await paneToggle('Agent').click()
+await page.waitForTimeout(300)
+check('preview toggled off', await paneToggle('Preview').evaluate(el => !el.classList.contains('active')))
+check('agent toggled off', await paneToggle('Agent').evaluate(el => !el.classList.contains('active')))
+check('editor stays active with others off', await paneToggle('Editor').evaluate(el => el.classList.contains('active')))
+await paneToggle('Editor').click()
+await page.waitForTimeout(300)
+check('guard blocks collapsing the last main pane', await paneToggle('Editor').evaluate(el => el.classList.contains('active')))
+// restore all panes
+await paneToggle('Preview').click()
+await paneToggle('Agent').click()
+await page.waitForTimeout(300)
+check('panes restored', (await boxVisible('.panel-preview')) && (await boxVisible('.panel-chat')))
+
+// --- layout persists across reload ---
+await paneToggle('Agent').click()
+await page.waitForTimeout(300)
+await page.reload({ waitUntil: 'domcontentloaded' })
+await page.waitForTimeout(1500)
+check('collapsed agent stays collapsed after reload', !(await boxVisible('.panel-chat')))
+await paneToggle('Agent').click()
+await page.waitForTimeout(300)
+check('agent expandable after reload', await boxVisible('.panel-chat'))
+
+// --- typst preview page fidelity (SVG rescaled to container width) ---
+await putFile('page.typ', '#set page(width: 10cm, height: 15cm)\n#align(center)[Typst Page]\n')
+await page.waitForTimeout(800)
+const typRow = page.locator('[role="treeitem"]', { hasText: 'page.typ' }).first()
+await typRow.click()
+let typFound = false
+for (let i = 0; i < 24; i++) {
+  await page.waitForTimeout(500) // typst WASM compile + render
+  if (await page.locator('.typ-body svg').count()) {
+    typFound = true
+    break
+  }
+}
+const typSvg = page.locator('.typ-body svg').first()
+if (typFound) {
+  const cw = await page.locator('.typ-body').evaluate(el => el.clientWidth)
+  const svgW = parseFloat((await typSvg.getAttribute('width')) ?? '0')
+  const svgH = parseFloat((await typSvg.getAttribute('height')) ?? '0')
+  check('typst svg rescaled to container width', svgW > 0 && Math.abs(svgW - cw) < 2)
+  check('typst svg keeps positive aspect', svgH > 0)
+} else {
+  check('typst svg rescaled to container width', false)
+  check('typst svg keeps aspect ratio', false)
+}
+// bring welcome.md back for the chat section below
+await page.locator('[role="treeitem"]', { hasText: 'welcome.md' }).first().click()
+await page.waitForTimeout(300)
+
 let chatStatus = ''
 for (let i = 0; i < 20; i++) {
   await page.waitForTimeout(1000)

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import MarkdownIt from 'markdown-it'
 import DOMPurify from 'dompurify'
 import hljs from 'highlight.js/lib/common'
@@ -30,6 +30,7 @@ export function MarkdownView({ source }: { source: string }) {
 export function TypstView({ source }: { source: string }) {
   const [svg, setSvg] = useState('')
   const [err, setErr] = useState('')
+  const containerRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -50,9 +51,25 @@ export function TypstView({ source }: { source: string }) {
     }
   }, [source])
 
+  useEffect(() => {
+    if (!svg || !containerRef.current) return
+    const svgElem = containerRef.current.querySelector('svg')
+    if (!svgElem) return
+    const w = Number.parseFloat(svgElem.getAttribute('width') ?? '')
+    const h = Number.parseFloat(svgElem.getAttribute('height') ?? '')
+    if (!w || !h) return
+    const cw = containerRef.current.clientWidth
+    svgElem.setAttribute('width', String(cw))
+    svgElem.setAttribute('height', String((h * cw) / w))
+  }, [svg])
+
   return (
     <div className="preview-pane">
-      {err ? <pre className="typ-error">{err}</pre> : <div className="typ-body" dangerouslySetInnerHTML={{ __html: svg }} />}
+      {err ? (
+        <pre className="typ-error">{err}</pre>
+      ) : (
+        <div className="typ-body" ref={containerRef} dangerouslySetInnerHTML={{ __html: svg }} />
+      )}
     </div>
   )
 }

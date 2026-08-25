@@ -24,6 +24,7 @@ import { json } from '@codemirror/lang-json'
 import { tags as t } from '@lezer/highlight'
 import { indentWithTab } from '@codemirror/commands'
 import { toast } from 'sonner'
+import { Panel, PanelGroup, PanelResizeHandle, type ImperativePanelHandle } from 'react-resizable-panels'
 import { subscribeWatch } from '../watch-client'
 import * as api from '../api'
 import { bytesToBase64, typstPdfBytes } from '../typst'
@@ -40,6 +41,10 @@ interface Props {
   onActivate: (path: string) => void
   onClose: (path: string) => void
   flushRef?: MutableRefObject<(() => void) | null>
+  editorPanelRef?: MutableRefObject<ImperativePanelHandle | null>
+  previewPanelRef?: MutableRefObject<ImperativePanelHandle | null>
+  onEditorCollapsed?: (collapsed: boolean) => void
+  onPreviewCollapsed?: (collapsed: boolean) => void
 }
 
 const vulcainHighlight = HighlightStyle.define([
@@ -113,10 +118,20 @@ const IMAGE_EXT = /\.(png|jpe?g|gif|webp|svg|avif|bmp|ico)$/i
 const AUTOSAVE_DELAY = 1000
 const SAVE_GUARD_WINDOW = 400
 
-export default function EditorPane({ ws, tabs, activePath, onActivate, onClose, flushRef }: Props) {
+export default function EditorPane({
+  ws,
+  tabs,
+  activePath,
+  onActivate,
+  onClose,
+  flushRef,
+  editorPanelRef,
+  previewPanelRef,
+  onEditorCollapsed,
+  onPreviewCollapsed
+}: Props) {
   const [contents, setContents] = useState<Record<string, string>>({})
   const [dirty, setDirty] = useState<Record<string, boolean>>({})
-  const [previewOn, setPreviewOn] = useState(true)
   const contentsRef = useRef<Record<string, string>>({})
   contentsRef.current = contents
   const dirtyRef = useRef<Record<string, boolean>>({})
@@ -245,7 +260,7 @@ export default function EditorPane({ ws, tabs, activePath, onActivate, onClose, 
   const content = activePath ? contents[activePath] ?? '' : ''
   const isMd = !!activePath && /\.md$/i.test(activePath)
   const isTyp = !!activePath && /\.typ$/i.test(activePath)
-  const showPreview = previewOn && (isMd || isTyp)
+  const previewable = isMd || isTyp
 
   const exportPdf = useCallback(async () => {
     if (!activePath || !content) return
@@ -288,11 +303,8 @@ export default function EditorPane({ ws, tabs, activePath, onActivate, onClose, 
             </button>
           </div>
         ))}
-        {(isMd || isTyp) && (
+        {previewable && (
           <div className="preview-toolbar">
-            <button className="btn" onClick={() => setPreviewOn(v => !v)}>
-              {showPreview ? 'Édition seule' : 'Preview'}
-            </button>
             {isTyp && (
               <button className="btn primary" onClick={exportPdf}>
                 Compiler PDF
@@ -311,8 +323,16 @@ export default function EditorPane({ ws, tabs, activePath, onActivate, onClose, 
         <iframe src={api.fileUrl(ws, activePath)} style={{ flex: 1, border: 'none' }} title={activePath} />
       ) : (
         <div className="editor-area">
-          {showPreview ? (
-            <div className="editor-split">
+          <PanelGroup direction="horizontal" autoSaveId="vulcain.center">
+            <Panel
+              ref={editorPanelRef}
+              collapsible
+              collapsedSize={0}
+              minSize={15}
+              defaultSize={50}
+              onCollapse={() => onEditorCollapsed?.(true)}
+              onExpand={() => onEditorCollapsed?.(false)}
+            >
               <div className="editor-half">
                 <div className="cm-editor-host">
                   <CodeEditor
@@ -324,21 +344,26 @@ export default function EditorPane({ ws, tabs, activePath, onActivate, onClose, 
                   />
                 </div>
               </div>
-              {isMd ? <MarkdownView source={content} /> : <TypstView source={content} />}
-            </div>
-          ) : (
-            <div className="editor-half">
-              <div className="cm-editor-host">
-                <CodeEditor
-                  key={`${ws}:${activePath}`}
-                  value={content}
-                  extensions={langExtensions(activePath)}
-                  onChange={v => handleChange(activePath, v)}
-                  onSave={save}
-                />
-              </div>
-            </div>
-          )}
+            </Panel>
+            {previewable && (
+              <>
+                <PanelResizeHandle />
+                <Panel
+                  ref={previewPanelRef}
+                  collapsible
+                  collapsedSize={0}
+                  minSize={15}
+                  defaultSize={50}
+                  onCollapse={() => onPreviewCollapsed?.(true)}
+                  onExpand={() => onPreviewCollapsed?.(false)}
+                >
+                  <div className="panel-preview">
+                    {isMd ? <MarkdownView source={content} /> : <TypstView source={content} />}
+                  </div>
+                </Panel>
+              </>
+            )}
+          </PanelGroup>
         </div>
       )}
     </>

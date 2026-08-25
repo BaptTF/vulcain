@@ -1,11 +1,19 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels'
+import {
+  Panel,
+  PanelGroup,
+  PanelResizeHandle,
+  type ImperativePanelHandle
+} from 'react-resizable-panels'
 import { Toaster } from 'sonner'
 import { getMeta, setTheme, type Meta } from './api'
 import FileTree from './components/FileTree'
 import EditorPane, { type Tab } from './components/EditorPane'
 import Chat from './components/Chat'
 import WorkspaceModal from './components/WorkspaceModal'
+
+type PaneId = 'tree' | 'editor' | 'preview' | 'agent'
+const MAIN_PANES: PaneId[] = ['editor', 'preview', 'agent']
 
 export default function App() {
   const [meta, setMeta] = useState<Meta | null>(null)
@@ -17,6 +25,38 @@ export default function App() {
   const flushRef = useRef<(() => void) | null>(null)
   const activeWsRef = useRef(activeWs)
   activeWsRef.current = activeWs
+
+  const treeRef = useRef<ImperativePanelHandle>(null)
+  const editorRef = useRef<ImperativePanelHandle>(null)
+  const previewRef = useRef<ImperativePanelHandle>(null)
+  const agentRef = useRef<ImperativePanelHandle>(null)
+  const paneRefs: Record<PaneId, React.RefObject<ImperativePanelHandle | null>> = {
+    tree: treeRef,
+    editor: editorRef,
+    preview: previewRef,
+    agent: agentRef
+  }
+  const [panes, setPanes] = useState<Record<PaneId, boolean>>({
+    tree: true,
+    editor: true,
+    preview: true,
+    agent: true
+  })
+
+  const setPane = useCallback((id: PaneId, open: boolean) => {
+    setPanes(prev => (prev[id] === open ? prev : { ...prev, [id]: open }))
+  }, [])
+
+  const togglePane = useCallback((id: PaneId) => {
+    const ref = paneRefs[id]
+    const open = !ref.current?.isCollapsed()
+    if (open && MAIN_PANES.includes(id)) {
+      const othersOpen = MAIN_PANES.some(other => other !== id && !paneRefs[other].current?.isCollapsed())
+      if (!othersOpen) return
+    }
+    if (open) ref.current?.collapse()
+    else ref.current?.expand()
+  }, [paneRefs])
 
   const tabsKey = (ws: string) => `vulcain.tabs.${ws}`
   const readSaved = useCallback((ws: string): { tabs: string[]; active: string | null } => {
@@ -127,15 +167,36 @@ export default function App() {
         </button>
       </header>
 
+      <div className="viewbar">
+        {(Object.keys(paneRefs) as PaneId[]).map(id => (
+          <button
+            key={id}
+            className={`pane-toggle${panes[id] ? ' active' : ''}`}
+            onClick={() => togglePane(id)}
+            title={panes[id] ? `Masquer ${id}` : `Afficher ${id}`}
+          >
+            {id === 'tree' ? 'Tree' : id === 'editor' ? 'Editor' : id === 'preview' ? 'Preview' : 'Agent'}
+          </button>
+        ))}
+      </div>
+
       <div className="main-panels">
-        <PanelGroup direction="horizontal">
-          <Panel defaultSize={20} minSize={12}>
+        <PanelGroup direction="horizontal" autoSaveId="vulcain.outer">
+          <Panel
+            ref={treeRef}
+            collapsible
+            collapsedSize={0}
+            minSize={12}
+            defaultSize={20}
+            onCollapse={() => setPane('tree', false)}
+            onExpand={() => setPane('tree', true)}
+          >
             <div className="panel-tree">
               <FileTree ws={activeWs} onOpen={openFile} />
             </div>
           </Panel>
           <PanelResizeHandle />
-          <Panel minSize={25}>
+          <Panel minSize={10}>
             <div className="panel-center">
               <EditorPane
                 ws={activeWs}
@@ -144,11 +205,23 @@ export default function App() {
                 onActivate={setActiveTab}
                 onClose={closeTab}
                 flushRef={flushRef}
+                editorPanelRef={editorRef}
+                previewPanelRef={previewRef}
+                onEditorCollapsed={(c) => setPane('editor', !c)}
+                onPreviewCollapsed={(c) => setPane('preview', !c)}
               />
             </div>
           </Panel>
           <PanelResizeHandle />
-          <Panel defaultSize={28} minSize={16}>
+          <Panel
+            ref={agentRef}
+            collapsible
+            collapsedSize={0}
+            minSize={16}
+            defaultSize={28}
+            onCollapse={() => setPane('agent', false)}
+            onExpand={() => setPane('agent', true)}
+          >
             <Chat ws={activeWs} onOpenFile={openFile} />
           </Panel>
         </PanelGroup>

@@ -89,6 +89,34 @@ button, input, textarea, select {
   outline: none;
 }
 
+.viewbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 36px;
+  padding: 0 12px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.pane-toggle {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 3px 12px;
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.pane-toggle:hover { color: var(--text); border-color: var(--accent); }
+.pane-toggle.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
 .spacer { flex: 1; }
 
 .btn {
@@ -236,16 +264,11 @@ button, input, textarea, select {
   flex: 1;
   min-height: 0;
   display: flex;
-}
-
-.editor-split {
-  display: flex;
-  flex: 1;
-  min-width: 0;
+  overflow: hidden;
 }
 
 .editor-half {
-  flex: 1;
+  height: 100%;
   min-width: 0;
   position: relative;
 }
@@ -270,8 +293,8 @@ button, input, textarea, select {
   color: var(--muted);
 }
 
-.preview-pane {
-  flex: 1;
+.panel-preview {
+  height: 100%;
   min-width: 0;
   border-left: 1px solid var(--border);
   background: var(--panel);
@@ -296,7 +319,7 @@ button, input, textarea, select {
   border-radius: 8px;
 }
 
-.md-body { line-height: 1.65; max-width: 820px; }
+.md-body { line-height: 1.65; max-width: 820px; margin: 0 auto; }
 .md-body h1, .md-body h2, .md-body h3, .md-body h4 { line-height: 1.25; margin: 1.2em 0 0.5em; }
 .md-body h1 { font-size: 1.7em; border-bottom: 1px solid var(--border); padding-bottom: 0.25em; }
 .md-body h2 { font-size: 1.4em; }
@@ -329,6 +352,16 @@ button, input, textarea, select {
 .md-body hr { border: none; border-top: 1px solid var(--border); }
 
 .hljs { color: inherit; }
+
+.typ-body svg {
+  display: block;
+  margin: 0 auto;
+  height: auto;
+  max-width: 100%;
+  background: #fff;
+  border-radius: 4px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+}
 
 .panel-chat {
   height: 100%;
@@ -500,9 +533,6 @@ button, input, textarea, select {
 }
 .chat-input:focus { border-color: var(--accent); }
 
-.resizer [data-panel-resize-handle-id] {
-  background: transparent;
-}
 [data-panel-resize-handle-enabled] {
   transition: background 0.15s;
 }
