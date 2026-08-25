@@ -258,6 +258,28 @@ for (let i = 0; i < 10; i++) {
 }
 check('switcher switches back to notes workspace', switchedBack)
 console.log(`  trigger after notes: ${(await wsTrigger.textContent())?.trim()}`)
+// create a brand new workspace from the switcher
+const newWsName = `ws-${Date.now()}`
+await wsTrigger.click()
+await page.waitForTimeout(300)
+await wsItem('Nouveau workspace').click()
+await page.waitForTimeout(300)
+check('switcher offers new-workspace form', await page.locator('.ws-create-input').isVisible())
+await page.locator('.ws-create-input').fill(newWsName)
+await page.locator('.ws-create .btn.primary').click()
+let wsCreated = false
+for (let i = 0; i < 10; i++) {
+  await page.waitForTimeout(300)
+  if (new RegExp(newWsName).test((await wsTrigger.textContent()) ?? '')) {
+    wsCreated = true
+    break
+  }
+}
+check('new workspace created and selected', wsCreated)
+await wsTrigger.click()
+await page.waitForTimeout(300)
+await wsItem('Notes').click()
+await page.waitForTimeout(400)
 // open the folder-explorer via the dropdown entry
 await wsTrigger.click()
 await page.waitForTimeout(300)

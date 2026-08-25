@@ -180,10 +180,33 @@ export function registerFsApi(app: FastifyInstance): void {
   })
 
   app.post('/api/workspaces', async (req) => {
-    const body = req.body as { name?: string; path?: string }
+    const body = req.body as { name?: string; path?: string; create?: boolean }
+    const name = (body.name ?? '').trim()
+    if (/[\\/:*?"<>|]/.test(name)) throw new Error('nom de workspace invalide')
+    if (name === '__config__') throw new Error('nom de workspace réservé')
+
+    let candidate: string
+    if (body.create) {
+      if (!name) throw new Error('nom requis')
+      candidate = path.resolve(browseRoot(), name)
+      if (isSandboxed() && !candidate.startsWith(browseRoot() + path.sep) && candidate !== browseRoot()) {
+        throw new Error('path escapes browse root')
+      }
+      const cfg = loadConfig()
+      if (cfg.workspaces.some(w => w.name === name)) throw new Error(`workspace déjà existant : ${name}`)
+      const norm = (p: string) => path.resolve(expandHome(p))
+      if (cfg.workspaces.some(w => norm(w.path) === candidate)) {
+        throw new Error('un workspace pointe déjà vers ce dossier')
+      }
+      await fsp.mkdir(candidate, { recursive: true })
+      cfg.workspaces.push({ name, path: tildePath(candidate) })
+      saveConfig(cfg)
+      return { ok: true, name }
+    }
+
     const rawPath = (body.path ?? '').trim()
     if (!rawPath) throw new Error('chemin requis')
-    let candidate = expandHome(rawPath)
+    candidate = expandHome(rawPath)
     if (!path.isAbsolute(candidate)) candidate = path.resolve(browseRoot(), candidate)
     candidate = path.resolve(candidate)
     if (isSandboxed() && !candidate.startsWith(browseRoot() + path.sep) && candidate !== browseRoot()) {
@@ -191,21 +214,19 @@ export function registerFsApi(app: FastifyInstance): void {
     }
     const st = await fsp.stat(candidate).catch(() => null)
     if (!st?.isDirectory()) throw new Error('dossier introuvable')
-    let name = (body.name ?? '').trim()
-    if (!name) {
+    let wsName = name
+    if (!wsName) {
       const base = path.basename(candidate)
       if (!base || /[\\/:*?"<>|]/.test(base)) throw new Error('impossible de dériver un nom du dossier')
-      name = base
+      wsName = base
     }
-    if (/[\\/:*?"<>|]/.test(name)) throw new Error('nom de workspace invalide')
-    if (name === '__config__') throw new Error('nom de workspace réservé')
     const cfg = loadConfig()
-    if (cfg.workspaces.some(w => w.name === name)) throw new Error(`workspace déjà existant : ${name}`)
+    if (cfg.workspaces.some(w => w.name === wsName)) throw new Error(`workspace déjà existant : ${wsName}`)
     const norm = (p: string) => path.resolve(expandHome(p))
     if (cfg.workspaces.some(w => norm(w.path) === candidate)) {
       throw new Error('un workspace pointe déjà vers ce dossier')
     }
-    cfg.workspaces.push({ name, path: tildePath(candidate) })
+    cfg.workspaces.push({ name: wsName, path: tildePath(candidate) })
     saveConfig(cfg)
     return { ok: true, name }
   })

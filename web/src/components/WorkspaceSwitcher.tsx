@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
-import { getMeta, removeWorkspace } from '../api'
+import { createWorkspace, getMeta, removeWorkspace } from '../api'
 
 interface Props {
   activeWs: string
@@ -11,6 +11,10 @@ interface Props {
 export default function WorkspaceSwitcher({ activeWs, onSelect, onOpenFolder }: Props) {
   const [workspaces, setWorkspaces] = useState<{ name: string; root?: string }[]>([])
   const [busy, setBusy] = useState(false)
+  const [creating, setCreating] = useState(false)
+  const [newName, setNewName] = useState('')
+  const [error, setError] = useState('')
+  const [menuOpen, setMenuOpen] = useState(false)
 
   const refresh = () => {
     getMeta()
@@ -35,8 +39,51 @@ export default function WorkspaceSwitcher({ activeWs, onSelect, onOpenFolder }: 
 
   const isConfigWs = activeWs === '__config__'
 
+  const startCreate = () => {
+    setCreating(true)
+    setNewName('')
+    setError('')
+  }
+
+  const submitCreate = async () => {
+    const name = newName.trim()
+    if (!name) return
+    if (/[\\/:*?"<>|]/.test(name)) {
+      setError('nom de workspace invalide')
+      return
+    }
+    setBusy(true)
+    setError('')
+    try {
+      await createWorkspace(name)
+      refresh()
+      onSelect(name)
+      setMenuOpen(false)
+      setCreating(false)
+    } catch (e: any) {
+      setError(e.message)
+    }
+    setBusy(false)
+  }
+
+  const cancelCreate = () => {
+    setCreating(false)
+    setNewName('')
+    setError('')
+  }
+
   return (
-    <DropdownMenu.Root onOpenChange={open => open && refresh()}>
+    <DropdownMenu.Root
+      open={menuOpen}
+      onOpenChange={open => {
+        setMenuOpen(open)
+        if (open) {
+          refresh()
+          setCreating(false)
+          setError('')
+        }
+      }}
+    >
       <DropdownMenu.Trigger asChild>
         <button className="btn" title="Changer de workspace">
           {isConfigWs ? 'Config' : activeWs || '…'} ▾
@@ -69,6 +116,40 @@ export default function WorkspaceSwitcher({ activeWs, onSelect, onOpenFolder }: 
             </DropdownMenu.Item>
           ))}
           <DropdownMenu.Separator className="ws-menu-sep" />
+          {creating ? (
+            <div className="ws-create">
+              <input
+                className="ws-create-input"
+                autoFocus
+                value={newName}
+                placeholder="Nom du workspace"
+                onChange={e => setNewName(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') void submitCreate()
+                  if (e.key === 'Escape') cancelCreate()
+                }}
+              />
+              {error && <div className="ws-error">{error}</div>}
+              <div className="ws-create-actions">
+                <button className="btn" disabled={busy} onClick={cancelCreate}>
+                  Annuler
+                </button>
+                <button className="btn primary" disabled={busy || !newName.trim()} onClick={() => void submitCreate()}>
+                  Créer
+                </button>
+              </div>
+            </div>
+          ) : (
+            <DropdownMenu.Item
+              className="ws-menu-item"
+              onSelect={e => {
+                e.preventDefault()
+                startCreate()
+              }}
+            >
+              <span className="ws-menu-name">Nouveau workspace…</span>
+            </DropdownMenu.Item>
+          )}
           <DropdownMenu.Item className="ws-menu-item" onSelect={() => onOpenFolder()}>
             <span className="ws-menu-name">Ouvrir un dossier…</span>
           </DropdownMenu.Item>

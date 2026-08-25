@@ -657,6 +657,28 @@ button, input, textarea, select {
 .ws-menu-sep { height: 1px; margin: 4px 2px; background: var(--border); }
 .ws-menu-note { color: var(--muted); font-size: 12px; padding: 4px 8px; }
 
+.ws-create {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px 4px;
+}
+.ws-create-input {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 8px;
+  color: var(--text);
+  outline: none;
+  font-size: 13px;
+}
+.ws-create-input:focus { border-color: var(--accent); }
+.ws-create-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
 .ws-nav {
   display: flex;
   align-items: center;

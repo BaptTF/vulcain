@@ -20,8 +20,9 @@ await new Promise(resolve => setTimeout(resolve, 300))
 const { default: http } = await import('node:http')
 function reqJson(method, path, body) {
   return new Promise((resolve, reject) => {
+    const headers = body !== undefined ? { 'content-type': 'application/json' } : {}
     const r = http.request(
-      { host: '127.0.0.1', port: PORT, path, method, agent: false, headers: { 'content-type': 'application/json' } },
+      { host: '127.0.0.1', port: PORT, path, method, agent: false, headers },
       res => {
         let data = ''
         res.on('data', c => (data += c))
@@ -29,7 +30,7 @@ function reqJson(method, path, body) {
       }
     )
     r.on('error', reject)
-    r.end(JSON.stringify(body))
+    r.end(body !== undefined ? JSON.stringify(body) : undefined)
   })
 }
 
@@ -42,6 +43,27 @@ const clashFile = `__clash_file_${Date.now()}`
 await reqJson('PUT', '/api/fs/file', { ws: 'Notes', path: clashFile, content: 'x' })
 const mkdirClash = await reqJson('POST', '/api/fs/mkdir', { ws: 'Notes', path: clashFile })
 check('fs: mkdir on existing file gives clear error', mkdirClash.status === 500 && /fichier porte déjà ce nom/.test(mkdirClash.body.error ?? ''))
+
+const createdWs = `__created_${Date.now()}`
+const createWs = await reqJson('POST', '/api/workspaces', { name: createdWs, create: true })
+check('workspaces: create creates folder + registers', createWs.status === 200 && createWs.body?.ok)
+const metaAfter = await reqJson('GET', '/api/meta')
+check(
+  'workspaces: created appears in meta',
+  metaAfter.body?.workspaces?.some(w => w.name === createdWs)
+)
+const createdPut = await reqJson('PUT', '/api/fs/file', { ws: createdWs, path: 'probe.md', content: 'ok' })
+const createdRead = await reqJson('GET', `/api/fs/file?ws=${createdWs}&path=probe.md`)
+check(
+  'workspaces: created workspace readable',
+  createdPut.status === 200 && createdRead.body?.content === 'ok'
+)
+const removed = await reqJson('DELETE', `/api/workspaces/${createdWs}`)
+const metaAfterDel = await reqJson('GET', '/api/meta')
+check(
+  'workspaces: removed on cleanup',
+  removed.status === 200 && !metaAfterDel.body?.workspaces?.some(w => w.name === createdWs)
+)
 
 const watch = new WebSocket(`ws://127.0.0.1:${PORT}/api/watch?ws=Notes`)
 let watchOpen = false

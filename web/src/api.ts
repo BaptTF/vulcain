@@ -109,6 +109,10 @@ export function addWorkspace(name: string, path: string): Promise<void> {
   return req('/api/workspaces', { method: 'POST', body: JSON.stringify({ name, path }) })
 }
 
+export function createWorkspace(name: string): Promise<void> {
+  return req('/api/workspaces', { method: 'POST', body: JSON.stringify({ name, create: true }) })
+}
+
 export function removeWorkspace(name: string): Promise<void> {
   return req(`/api/workspaces/${encodeURIComponent(name)}`, { method: 'DELETE' })
 }
