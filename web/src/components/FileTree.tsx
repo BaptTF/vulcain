@@ -467,7 +467,6 @@ function RowView({ node, style, dragHandle }: any) {
         display: 'flex',
         alignItems: 'center',
         gap: 5,
-        paddingLeft: 4,
         borderRadius: 5,
         cursor: editing ? 'default' : 'pointer',
         background: isSelected ? 'var(--accent-soft)' : undefined,
