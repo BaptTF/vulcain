@@ -471,6 +471,7 @@ function RowView({ node, style, dragHandle }: any) {
   const data = n.data
   const isDir = data.type === 'dir'
   const isSelected = selectedId === data.id
+  const isDropTarget = n.willReceiveDrop
   const editing = n.isEditing
   const inputRef = useRef<HTMLInputElement | null>(null)
 
@@ -484,6 +485,7 @@ function RowView({ node, style, dragHandle }: any) {
     <div
       ref={dragHandle}
       data-row="1"
+      className={isDropTarget ? 'is-drop-target' : undefined}
       style={{
         ...style,
         display: 'flex',
@@ -491,7 +493,9 @@ function RowView({ node, style, dragHandle }: any) {
         gap: 5,
         borderRadius: 5,
         cursor: editing ? 'default' : 'pointer',
-        background: isSelected ? 'var(--accent-soft)' : undefined,
+        background: isDropTarget ? 'var(--drop-target)' : isSelected ? 'var(--accent-soft)' : undefined,
+        boxShadow: isDropTarget ? 'inset 0 0 0 1px var(--accent)' : undefined,
+        opacity: n.isDragging ? 0.45 : undefined,
         color: isSelected ? 'var(--text)' : undefined
       }}
       title={editing ? undefined : data.path}

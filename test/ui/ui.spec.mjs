@@ -72,41 +72,55 @@ await editRow().locator('.tree-edit-input').press('Enter')
 await page.waitForTimeout(400)
 check('new folder created with a name', await page.locator('[role="treeitem"]', { hasText: newFolderName }).first().isVisible())
 
-// --- drag & drop: move a file into a folder ---
-const dragRowOnto = async (fromName, toName) => {
-  return page.evaluate(
-    async ({ fromName, toName }) => {
+// --- drag & drop: moving a file highlights the target folder (like VSCode) ---
+const folderRow = page.locator('[role="treeitem"]', { hasText: newFolderName }).first()
+const dndEvent = async ({ type, srcName, dstName }) =>
+  page.evaluate(
+    ({ type, srcName, dstName }) => {
       const rows = Array.from(document.querySelectorAll('[role="treeitem"]'))
-      const srcRow = rows.find(r => r.textContent?.includes(fromName))
-      const dstRow = rows.find(r => r.textContent?.includes(toName))
+      const srcRow = rows.find(r => r.textContent?.includes(srcName))
+      const dstRow = rows.find(r => r.textContent?.includes(dstName))
       if (!srcRow || !dstRow) return false
       const src = srcRow.querySelector('[data-row="1"]') ?? srcRow
       const rect = dstRow.getBoundingClientRect()
-      const fire = (el, type) =>
-        el.dispatchEvent(
-          new DragEvent(type, {
-            bubbles: true,
-            cancelable: true,
-            clientX: rect.left + rect.width / 2,
-            clientY: rect.top + rect.height / 2,
-            dataTransfer: new DataTransfer()
-          })
-        )
-      fire(src, 'dragstart')
-      await new Promise(r => setTimeout(r, 60)) // let react-dnd publish the drag source
-      fire(dstRow, 'dragenter')
-      fire(dstRow, 'dragover')
-      fire(dstRow, 'drop')
-      fire(src, 'dragend')
+      const target = type === 'dragstart' || type === 'dragend' ? src : dstRow
+      target.dispatchEvent(
+        new DragEvent(type, {
+          bubbles: true,
+          cancelable: true,
+          clientX: rect.left + rect.width / 2,
+          clientY: rect.top + rect.height / 2,
+          dataTransfer: new DataTransfer()
+        })
+      )
       return true
     },
-    { fromName, toName }
+    { type, srcName, dstName }
   )
+const dragStart = async name => {
+  const ok = await dndEvent({ type: 'dragstart', srcName: name, dstName: name })
+  if (ok) await page.waitForTimeout(60) // let react-dnd publish the drag source
+  return ok
 }
-check('drag source and target rows found', await dragRowOnto(newFileName, newFolderName))
+const dragHover = async (srcName, dstName) => {
+  const ok = await dndEvent({ type: 'dragenter', srcName, dstName })
+  return ok && (await dndEvent({ type: 'dragover', srcName, dstName }))
+}
+const dragDrop = async (srcName, dstName) => {
+  const ok = await dndEvent({ type: 'drop', srcName, dstName })
+  return ok && (await dndEvent({ type: 'dragend', srcName, dstName }))
+}
+
+check('drag source row found', await dragStart(newFileName))
+check('target folder hovered', await dragHover(newFileName, newFolderName))
+await page.waitForTimeout(250) // let react-arborist update willReceiveDrop + re-render
+check(
+  'target folder highlighted while dragging',
+  await folderRow.locator('[data-row="1"]').evaluate(el => el.classList.contains('is-drop-target'))
+)
+check('drop dispatched', await dragDrop(newFileName, newFolderName))
 await page.waitForTimeout(1000) // rename round-trip + watch debounce (250ms) + reload
 const movedRow = page.locator('[role="treeitem"]', { hasText: newFileName }).first()
-const folderRow = page.locator('[role="treeitem"]', { hasText: newFolderName }).first()
 check('moved file still listed in tree', await movedRow.isVisible())
 const fileLevel = Number(await movedRow.getAttribute('aria-level'))
 const folderLevel = Number(await folderRow.getAttribute('aria-level'))

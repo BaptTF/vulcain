@@ -7,6 +7,7 @@
   --muted: #8b93a5;
   --accent: #5b8cff;
   --accent-soft: rgba(91, 140, 255, 0.15);
+  --drop-target: rgba(91, 140, 255, 0.22);
   --danger: #ff6b6b;
   --ok: #4ecf8d;
   --warn: #e8b34c;
@@ -28,6 +29,7 @@
   --muted: #6b7280;
   --accent: #2f6bff;
   --accent-soft: rgba(47, 107, 255, 0.12);
+  --drop-target: rgba(47, 107, 255, 0.18);
   --danger: #d84b4b;
   --ok: #199d5c;
   --warn: #b07d1a;
