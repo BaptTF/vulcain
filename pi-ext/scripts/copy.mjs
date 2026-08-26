@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const dest = path.join(here, '..', 'dist')
+fs.rmSync(dest, { recursive: true, force: true })
 fs.mkdirSync(dest, { recursive: true })
-fs.copyFileSync(path.join(here, '..', 'src', 'vulcain-tools.ts'), path.join(dest, 'vulcain-tools.ts'))
-console.log('[pi-ext] copied vulcain-tools.ts -> dist/')
+fs.cpSync(path.join(here, '..', 'src'), path.join(dest, 'vulcain-tools'), { recursive: true })
+console.log('[pi-ext] copied src/ -> dist/vulcain-tools/')

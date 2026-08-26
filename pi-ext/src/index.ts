@@ -1,50 +1,10 @@
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import { Type } from 'typebox'
-
-interface CamofoxConfig {
-  baseUrl?: string
-  accessKey?: string
-}
-
-interface WebSearchConfig {
-  provider?: string
-  macro?: string
-}
-
-function loadVulcainConfig(): { tools?: { camofox?: CamofoxConfig; webSearch?: WebSearchConfig } } {
-  const base = process.env.VULCAIN_HOME || path.join(os.homedir(), '.vulcain')
-  try {
-    return JSON.parse(fs.readFileSync(path.join(base, 'config', 'config.json'), 'utf8'))
-  } catch {
-    return {}
-  }
-}
-
-function camofoxBase(): string {
-  const c = loadVulcainConfig().tools?.camofox
-  return (c?.baseUrl ?? 'http://127.0.0.1:9377').replace(/\/+$/, '')
-}
-
-async function camofox(method: string, urlPath: string, body?: unknown): Promise<any> {
-  const accessKey = loadVulcainConfig().tools?.camofox?.accessKey
-  const res = await fetch(`${camofoxBase()}${urlPath}`, {
-    method,
-    headers: {
-      ...(accessKey ? { authorization: `Bearer ${accessKey}` } : {}),
-      ...(body !== undefined ? { 'content-type': 'application/json' } : {})
-    },
-    ...(body !== undefined ? { body: JSON.stringify(body) } : {})
-  })
-  if (!res.ok) {
-    const text = await res.text().catch(() => '')
-    throw new Error(`camofox ${method} ${urlPath} -> ${res.status}: ${text.slice(0, 500)}`)
-  }
-  const ct = res.headers.get('content-type') ?? ''
-  if (ct.includes('application/json')) return res.json()
-  return Buffer.from(await res.arrayBuffer())
-}
+import { camofox, loadVulcainConfig } from './providers.ts'
+import { formatSearchResults } from './format.ts'
+import { runResearch, runSearch } from './research.ts'
+import { readUrl } from './providers.ts'
 
 async function snapshot(tabId: string, extraQuery = ''): Promise<string> {
   const data = await camofox('GET', `/tabs/${tabId}/snapshot?userId=vulcain${extraQuery}`)
@@ -63,26 +23,66 @@ export default function (pi: any) {
     name: 'web_search',
     label: 'Web Search',
     description:
-      'Search the web via the stealth browser (Google). Returns a text snapshot of results. Use browser_* tools to open and read a result page.',
+      'Search the web (SearXNG metasearch by default, or Tavily). Returns ranked results with titles, URLs and snippets. Use web_read to extract a page fast, or browser_open for full control.',
     parameters: Type.Object({
-      query: Type.String({ description: 'The search query' })
+      query: Type.String({ description: 'The search query' }),
+      category: Type.Optional(Type.String({ description: 'Result category: general, news, science, academic, it, files (SearXNG) or news, finance (Tavily)' })),
+      timeRange: Type.Optional(Type.String({ description: 'Tavily time range: day, week, month, year' })),
+      maxResults: Type.Optional(Type.Number({ description: 'Max results (default from config, 6)' }))
     }),
     async execute(_id: string, params: any) {
-      const search = loadVulcainConfig().tools?.webSearch
-      const macro = search?.macro ?? '@google_search'
-      let tabId = ''
-      try {
-        const tab = await camofox('POST', '/tabs', { userId: 'vulcain', sessionKey: 'vulcain-search' })
-        tabId = tab.tabId
-        await camofox('POST', `/tabs/${tabId}/navigate`, { userId: 'vulcain', macro, query: params.query })
-        const snap = await snapshot(tabId)
-        return {
-          content: [{ type: 'text', text: `Search results for "${params.query}" (refs e1, e2... are clickable):\n\n${snap}` }],
-          details: {}
-        }
-      } finally {
-        if (tabId) void closeTabQuietly(tabId)
-      }
+      const cfg = loadVulcainConfig().tools ?? {}
+      const resp = await runSearch(cfg, {
+        query: params.query,
+        category: params.category,
+        timeRange: params.timeRange,
+        maxResults: params.maxResults
+      })
+      return { content: [{ type: 'text', text: formatSearchResults(params.query, resp.results, resp.answer) }], details: {} }
+    }
+  })
+
+  pi.registerTool({
+    name: 'web_research',
+    label: 'Web Research',
+    description:
+      'Agentic multi-query research. Fires the topic and optional subQueries in parallel across the configured search provider, merges and dedupes results, and returns a sourced markdown brief ([1], [2]...). With depth=deep it also extracts the top sources. With saveToNote it writes the brief to .research/<topic>.md in the workspace.',
+    parameters: Type.Object({
+      topic: Type.String({ description: 'The research topic / main query' }),
+      subQueries: Type.Optional(Type.Array(Type.String(), { description: 'Additional queries to run in parallel' })),
+      depth: Type.Optional(Type.Union([Type.Literal('quick'), Type.Literal('deep')], { description: 'deep extracts the top sources content' })),
+      maxSources: Type.Optional(Type.Number({ description: 'Max sources to keep / extract (default 3)' })),
+      category: Type.Optional(Type.String({ description: 'Result category (see web_search)' })),
+      timeRange: Type.Optional(Type.String({ description: 'Tavily time range: day, week, month, year' })),
+      saveToNote: Type.Optional(Type.Boolean({ description: 'Write the brief to .research/<topic>.md in the workspace' }))
+    }),
+    async execute(_id: string, params: any) {
+      const cfg = loadVulcainConfig().tools ?? {}
+      const out = await runResearch(cfg, {
+        topic: params.topic,
+        subQueries: params.subQueries,
+        depth: params.depth,
+        maxSources: params.maxSources,
+        category: params.category,
+        timeRange: params.timeRange,
+        saveToNote: params.saveToNote
+      })
+      return { content: [{ type: 'text', text: out.note ? `${out.brief}\n\nSaved to ${out.note}` : out.brief }], details: {} }
+    }
+  })
+
+  pi.registerTool({
+    name: 'web_read',
+    label: 'Read URL',
+    description:
+      'Extract the readable text of a URL. Uses Tavily extract when a key is configured, otherwise the stealth browser. Faster than browser_open for static pages.',
+    parameters: Type.Object({
+      url: Type.String({ description: 'URL to read' })
+    }),
+    async execute(_id: string, params: any) {
+      const cfg = loadVulcainConfig().tools ?? {}
+      const text = await readUrl(cfg, params.url, globalThis.fetch)
+      return { content: [{ type: 'text', text: `# ${params.url}\n\n${text.slice(0, 12000)}` }], details: {} }
     }
   })
 
@@ -101,12 +101,11 @@ export default function (pi: any) {
         sessionKey: params.sessionKey ?? 'agent',
         url: params.url
       })
-      const snap = await snapshot(tab.tabId)
       return {
         content: [
           {
             type: 'text',
-            text: `Opened ${params.url} (tabId=${tab.tabId}).\n\n${snap}`
+            text: `Opened ${params.url} (tabId=${tab.tabId}).\n\n${await snapshot(tab.tabId)}`
           }
         ],
         details: { tabId: tab.tabId }

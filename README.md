@@ -66,11 +66,23 @@ Format standard [agentskills.io](https://agentskills.io), chargés nativement pa
 
 ## Outils ajoutés à pi (extension vulcain-tools)
 
-Installée dans `~/.pi/agent/extensions/vulcain-tools.ts`, lit la config Vulcain au runtime :
+Installée dans `~/.pi/agent/extensions/vulcain-tools/` (dossier, jiti), lit la config Vulcain au runtime :
 
-- `web_search(query)` — recherche Google via macro camofox, snapshot texte.
-- `browser_open/navigate/click/type/scroll/snapshot/close` — pilotage du navigateur avec refs stables (e1, e2…).
+- `web_search(query, category?, timeRange?, maxResults?)` — recherche web via le provider configuré (`tools.webSearch`).
+- `web_research(topic, subQueries?, depth?, maxSources?, category?, timeRange?, saveToNote?)` — recherche **agentique** : sous-requêtes en parallèle, fusion/dédoublonnage, brief markdown sourcé `[n]` ; `depth=deep` lit les top-sources ; `saveToNote` écrit `.research/<topic>.md`.
+- `web_read(url)` — extraction rapide du contenu d'une page (Tavily extract si clé, sinon camofox).
+- `browser_open/navigate/click/type/scroll/snapshot/close` — pilotage du navigateur stealth avec refs stables (e1, e2…) pour les pages protégées.
 - `browser_screenshot(tabId)` — PNG sauvé dans `<workspace>/.shots/`, chemin retourné au modèle.
+
+### Providers de recherche (`tools.webSearch`)
+
+| provider | besoin | notes |
+|---|---|---|
+| `searxng` | `baseUrl` (ex. `http://searxng.openclaw.svc.cluster.local:8080`) | metasearch parallèle, gratuit, self-hosted |
+| `tavily` | `apiKey` (free tier 1 000 req/mois) | search+extract en 1 appel, `topic`/`time_range` |
+| `camofox-macro` | camofox | Google via navigateur stealth (fallback par défaut) |
+
+Sans clé/baseUrl configuré, ou si le provider est injoignable, l'extension retombe sur `camofox-macro`. Autres réglages : `engines`, `categories`, `maxResults`, `tools.webRead.method`, `tools.research.{depth,maxSources,cacheTtlMinutes,saveToNote}`. Overrides env : `TAVILY_API_KEY`, `VULCAIN_SEARXNG_URL`.
 
 ## Architecture
 
@@ -92,4 +104,5 @@ VULCAIN_HOME=/tmp/vulcain-test node scripts/bootstrap.mjs
 # pointer cfg.agent.command vers ["node", "<repo>/test/fake-agent.mjs"]
 VULCAIN_HOME=/tmp/vulcain-test PI_CODING_AGENT_DIR=/tmp/vulcain-test-pi VULCAIN_PORT=7391 node server/dist/index.js &
 PI_CODING_AGENT_DIR=/tmp/vulcain-test-pi node test/e2e.mjs   # 9 checks : watch + initialize/session/prompt/streaming/tool_call + sync SYSTEM.md
+node test/web-search.mjs   # 19 checks : parsing SearXNG/Tavily, recherche parallèle + deep, cache, fallback camofox
 ```

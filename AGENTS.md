@@ -8,7 +8,7 @@ Vulcain is a minimal web note-taking editor:
 
 - **Markdown notes** (Obsidian-style) with a **PDF export** via Typst (WASM in the browser).
 - An **AI agent** wired in through the ACP protocol ([`pi`](https://github.com/earendil-works/pi) via the `pi-acp` adapter).
-- **Web search** and **stealth browsing** via [camofox](https://github.com/jo-inc/camofox-browser).
+- **Web search** via an agentic search layer in the pi extension (SearXNG metasearch self-hosted, optional Tavily) + **stealth browsing** via [camofox](https://github.com/jo-inc/camofox-browser) for protected sites.
 
 ```
 File tree │ CodeMirror 6 editor (+ md/typst preview, PDF export) │ Agent chat (ACP)
@@ -20,9 +20,9 @@ File tree │ CodeMirror 6 editor (+ md/typst preview, PDF export) │ Agent cha
 |---|---|
 | `web/` | React + Vite frontend: react-arborist, CodeMirror 6, react-resizable-panels, markdown-it + DOMPurify + highlight.js, Typst.ts WASM. All ACP protocol intelligence lives here (`web/src/acp.ts`). |
 | `server/` | Fastify backend: workspace-jailed fs API, chokidar → WS, WS⇄stdio bridge to `pi-acp` (pure `\n`-delimited JSON-RPC transport). The bridge is intentionally dumb and never parses the protocol. |
-| `pi-ext/` | TypeScript extension for pi (jiti, no compilation) exposing extra tools (`web_search`, `browser_*`, `browser_screenshot`). |
+| `pi-ext/` | TypeScript extension for pi (jiti, no compilation) exposing extra tools (`web_search`, `web_research`, `web_read`, `browser_*`, `browser_screenshot`). Copied as a directory to `~/.pi/agent/extensions/vulcain-tools/`. |
 | `scripts/` | Bootstrap and build helpers. |
-| `test/` | Fake ACP agent + e2e tests for the bridge and watcher (`node test/e2e.mjs`, requires a running server). `test/ui` for UI tests. |
+| `test/` | Fake ACP agent + e2e tests for the bridge and watcher (`node test/e2e.mjs`, requires a running server). Search-provider tests run standalone (`node test/web-search.mjs`). `test/ui` for UI tests. |
 | `docker/` | Dockerfile + compose. |
 | `.github/workflows/` | CI/CD (Docker build/push to ghcr.io). |
 
@@ -45,6 +45,7 @@ VULCAIN_HOME=/tmp/vulcain-test node scripts/bootstrap.mjs
 # point cfg.agent.command toward ["node", "<repo>/test/fake-agent.mjs"]
 VULCAIN_HOME=/tmp/vulcain-test PI_CODING_AGENT_DIR=/tmp/vulcain-test-pi VULCAIN_PORT=7391 node server/dist/index.js &
 PI_CODING_AGENT_DIR=/tmp/vulcain-test-pi node test/e2e.mjs   # 9 checks: watch + initialize/session/prompt/streaming/tool_call + SYSTEM.md sync
+node test/web-search.mjs                                      # 19 checks: SearXNG/Tavily parsing, parallel+deep research, cache, camofox fallback
 ```
 
 ### UI tests (`test/ui/ui.spec.mjs`)
@@ -86,7 +87,7 @@ These rules apply to every contribution. Violations are treated as review blocke
    Do not repeat yourself. Extract shared logic into reusable modules/functions instead of duplicating code. If a pattern appears a second time, refactor it into a shared helper. Keep the single source of truth (e.g. config lives in `~/.vulcain/config.json`) and reference it rather than duplicating values.
 
 4. **Test your changes.**
-   Any functional change must be accompanied by tests. The project uses `node test/e2e.mjs` (requires a running server) for backend/bridge coverage and `test/ui` for the frontend. Update existing tests and add new ones covering the changed behavior. Run `npm run lint` and the test suite before finishing.
+   Any functional change must be accompanied by tests. The project uses `node test/e2e.mjs` (requires a running server) for backend/bridge coverage, `node test/web-search.mjs` for the search providers/research orchestration, and `test/ui` for the frontend. Update existing tests and add new ones covering the changed behavior. Run `npm run lint` and the test suite before finishing.
 
 ## Conventions
 

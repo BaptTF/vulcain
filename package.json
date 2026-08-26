@@ -14,6 +14,7 @@
     "build": "npm run build -w pi-ext && npm run build -w server && npm run build -w web",
     "start": "npm run start -w server",
     "test:ui": "node scripts/test-ui.mjs",
+    "test:websearch": "node test/web-search.mjs",
     "test:ui:docker": "docker build -f docker/Dockerfile.test -t vulcain-test . && docker run --rm vulcain-test",
     "lint": "eslint ."
   },

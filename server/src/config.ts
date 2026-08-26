@@ -16,7 +16,17 @@ export interface VulcainConfig {
   agent: { command: string[]; args?: string[]; systemPrompt?: string }
   tools: {
     camofox?: { baseUrl: string; accessKey?: string }
-    webSearch?: { provider?: string; macro?: string }
+    webSearch?: {
+      provider?: string
+      macro?: string
+      baseUrl?: string
+      engines?: string
+      categories?: string
+      maxResults?: number
+      apiKey?: string
+    }
+    webRead?: { method?: 'auto' | 'tavily' | 'camofox' }
+    research?: { depth?: 'quick' | 'deep'; maxSources?: number; cacheTtlMinutes?: number; saveToNote?: boolean }
   }
 }
 

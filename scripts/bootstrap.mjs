@@ -16,7 +16,8 @@ const systemPromptPath = path.join(configDir, 'SYSTEM.md')
 
 const DEFAULT_SYSTEM_PROMPT = `You are an assistant embedded in Vulcain, a markdown note-taking app. You help the user with general tasks such as web research, fact-checking, summarization, drafting and answering questions — you are not a code editor.
 
-- Use the available tools (web_search, browser_*, etc.) when they would help answer accurately.
+- Use the available tools (web_search, web_research, web_read, browser_*, etc.) when they would help answer accurately.
+- For multi-angle questions, use web_research with subQueries to search in parallel.
 - When you search the web or browse, cite your sources.
 - Be concise, clear and write in the language the user writes in.
 `
@@ -60,7 +61,14 @@ if (!fs.existsSync(configPath)) {
     agent: { command: [process.env.VULCAIN_AGENT_CMD || 'pi-acp'], args: [], systemPrompt: systemPromptPath.replace(os.homedir(), '~') },
     tools: {
       camofox: { baseUrl: process.env.VULCAIN_CAMOFOX_URL || 'http://camofox:9377', accessKey: '' },
-      webSearch: { provider: 'camofox-macro', macro: '@google_search' }
+      webSearch: {
+        provider: 'searxng',
+        baseUrl: process.env.VULCAIN_SEARXNG_URL || 'http://127.0.0.1:8080',
+        engines: 'bing,duckduckgo,startpage,brave,wikipedia',
+        maxResults: 6
+      },
+      webRead: { method: 'auto' },
+      research: { depth: 'quick', maxSources: 3, cacheTtlMinutes: 30, saveToNote: false }
     }
   }
   fs.writeFileSync(configPath, JSON.stringify(cfg, null, 2) + '\n')
@@ -108,10 +116,14 @@ if (piSettings.defaultProjectTrust !== 'always') {
   console.log('[bootstrap] pi settings: defaultProjectTrust=always (.agents skills des workspaces actifs)')
 }
 
-const builtExt = path.join(repoRoot, 'pi-ext', 'dist', 'vulcain-tools.ts')
+const builtExt = path.join(repoRoot, 'pi-ext', 'dist', 'vulcain-tools')
+const extDestDir = path.join(piExtDir, 'vulcain-tools')
 if (fs.existsSync(builtExt)) {
-  fs.copyFileSync(builtExt, path.join(piExtDir, 'vulcain-tools.ts'))
-  console.log('[bootstrap] installed pi extension -> ' + path.join(piExtDir, 'vulcain-tools.ts'))
+  fs.rmSync(extDestDir, { recursive: true, force: true })
+  fs.cpSync(builtExt, extDestDir, { recursive: true })
+  console.log('[bootstrap] installed pi extension -> ' + extDestDir)
+  fs.rmSync(path.join(piExtDir, 'vulcain-tools.ts'), { force: true })
+  console.log('[bootstrap] removed legacy extension file vulcain-tools.ts')
 } else {
   console.log('[bootstrap] pi-ext not built yet, run: npm run build -w pi-ext')
 }
