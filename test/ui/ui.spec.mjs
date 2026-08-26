@@ -39,6 +39,42 @@ check(
   (await page.locator('.cm-content').first().textContent())?.includes('Bienvenue dans Vulcain') === true
 )
 
+// --- context menu: right-click rename must close the menu (like VSCode) ---
+await row.first().click({ button: 'right' })
+await page.waitForTimeout(200)
+const ctxMenu = page.locator('.tree-context')
+check('context menu opens on right-click', await ctxMenu.isVisible())
+await ctxMenu.locator('button', { hasText: 'Renommer' }).click()
+await page.waitForTimeout(200)
+check('context menu closes after clicking Renommer', (await ctxMenu.count()) === 0)
+await page.keyboard.press('Escape') // cancel any active inline rename
+
+// --- creation shows the file/folder icon on the left while naming (like VSCode) ---
+const editRow = () => page.locator('[role="treeitem"]', { has: page.locator('.tree-edit-input') }).first()
+const iconVisibleWhileNaming = async () =>
+  (await editRow().count()) > 0 && (await editRow().locator('svg').count()) > 0
+
+const newFileName = `new-${Date.now()}.md`
+await page.locator('.tree-toolbar button[title="Nouveau fichier"]').click()
+await page.waitForTimeout(300)
+check('new file shows file icon while naming', await iconVisibleWhileNaming())
+await editRow().locator('.tree-edit-input').fill(newFileName)
+await editRow().locator('.tree-edit-input').press('Enter')
+await page.waitForTimeout(400)
+check('new file created with a name', await page.locator('[role="treeitem"]', { hasText: newFileName }).first().isVisible())
+
+const newFolderName = `folder-${Date.now()}`
+await page.locator('.tree-toolbar button[title="Nouveau dossier"]').click()
+await page.waitForTimeout(300)
+check('new folder shows folder icon while naming', await iconVisibleWhileNaming())
+await editRow().locator('.tree-edit-input').fill(newFolderName)
+await editRow().locator('.tree-edit-input').press('Enter')
+await page.waitForTimeout(400)
+check('new folder created with a name', await page.locator('[role="treeitem"]', { hasText: newFolderName }).first().isVisible())
+// bring welcome.md back to the foreground so the autosave test below targets it
+await row.first().click()
+await page.waitForTimeout(300)
+
 // --- autosave: typing should persist to disk after the debounce ---
 await page.locator('.cm-content').first().click()
 await page.keyboard.type(' AUTOSAVE_MARKER')

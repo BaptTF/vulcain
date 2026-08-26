@@ -278,6 +278,11 @@ export default function FileTree({ ws, onOpen }: Props) {
     void tree.edit(path)
   }, [])
 
+  const runMenu = useCallback((fn: () => void) => {
+    setMenu(null)
+    fn()
+  }, [])
+
   const onTreeKeyDown = (e: React.KeyboardEvent) => {
     if (e.key !== 'F2') return
     const tree = treeRef.current
@@ -367,28 +372,28 @@ export default function FileTree({ ws, onOpen }: Props) {
         <div className="tree-context" style={{ left: menu.x, top: menu.y }} onClick={e => e.stopPropagation()}>
           {menu.background ? (
             <>
-              <button onClick={() => beginCreate('file', '')}>Nouveau fichier</button>
-              <button onClick={() => beginCreate('dir', '')}>Nouveau dossier</button>
-              <button onClick={() => pickInto('')}>Uploader ici</button>
+              <button onClick={() => runMenu(() => beginCreate('file', ''))}>Nouveau fichier</button>
+              <button onClick={() => runMenu(() => beginCreate('dir', ''))}>Nouveau dossier</button>
+              <button onClick={() => runMenu(() => pickInto(''))}>Uploader ici</button>
             </>
           ) : menu.isDir ? (
             <>
-              <button onClick={() => beginCreate('file', menu!.path)}>Nouveau fichier ici</button>
-              <button onClick={() => beginCreate('dir', menu!.path)}>Nouveau dossier ici</button>
-              <button onClick={() => pickInto(menu!.path)}>Uploader ici</button>
+              <button onClick={() => runMenu(() => beginCreate('file', menu!.path))}>Nouveau fichier ici</button>
+              <button onClick={() => runMenu(() => beginCreate('dir', menu!.path))}>Nouveau dossier ici</button>
+              <button onClick={() => runMenu(() => pickInto(menu!.path))}>Uploader ici</button>
               <div className="sep" />
-              <button onClick={() => beginRename(menu!.path)}>Renommer</button>
-              <button className="danger" onClick={() => requestDelete(menu!.path)}>
+              <button onClick={() => runMenu(() => beginRename(menu!.path))}>Renommer</button>
+              <button className="danger" onClick={() => runMenu(() => requestDelete(menu!.path))}>
                 Supprimer
               </button>
             </>
           ) : (
             <>
-              <a href={downloadUrl(ws, menu.path)} download>
+              <a href={downloadUrl(ws, menu.path)} download onClick={() => setMenu(null)}>
                 Télécharger
               </a>
-              <button onClick={() => beginRename(menu!.path)}>Renommer</button>
-              <button className="danger" onClick={() => requestDelete(menu!.path)}>
+              <button onClick={() => runMenu(() => beginRename(menu!.path))}>Renommer</button>
+              <button className="danger" onClick={() => runMenu(() => requestDelete(menu!.path))}>
                 Supprimer
               </button>
             </>
@@ -487,14 +492,10 @@ function RowView({ node, style, dragHandle }: any) {
         setMenu({ x: e.clientX, y: e.clientY, path: data.path, isDir })
       }}
     >
-      {!editing && (
-        <>
-          <span style={{ color: 'var(--muted)', fontSize: 10, width: 10, textAlign: 'center', flexShrink: 0 }}>
-            {isDir ? (n.isOpen ? '▾' : '▸') : ''}
-          </span>
-          {isDir ? <FolderIcon open={n.isOpen} /> : <FileIcon />}
-        </>
-      )}
+      <span style={{ color: 'var(--muted)', fontSize: 10, width: 10, textAlign: 'center', flexShrink: 0 }}>
+        {isDir ? (n.isOpen ? '▾' : '▸') : ''}
+      </span>
+      {isDir ? <FolderIcon open={n.isOpen} /> : <FileIcon />}
       {editing ? (
         <input
           ref={inputRef}
