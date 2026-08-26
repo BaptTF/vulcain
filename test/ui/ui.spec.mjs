@@ -71,6 +71,47 @@ await editRow().locator('.tree-edit-input').fill(newFolderName)
 await editRow().locator('.tree-edit-input').press('Enter')
 await page.waitForTimeout(400)
 check('new folder created with a name', await page.locator('[role="treeitem"]', { hasText: newFolderName }).first().isVisible())
+
+// --- drag & drop: move a file into a folder ---
+const dragRowOnto = async (fromName, toName) => {
+  return page.evaluate(
+    async ({ fromName, toName }) => {
+      const rows = Array.from(document.querySelectorAll('[role="treeitem"]'))
+      const srcRow = rows.find(r => r.textContent?.includes(fromName))
+      const dstRow = rows.find(r => r.textContent?.includes(toName))
+      if (!srcRow || !dstRow) return false
+      const src = srcRow.querySelector('[data-row="1"]') ?? srcRow
+      const rect = dstRow.getBoundingClientRect()
+      const fire = (el, type) =>
+        el.dispatchEvent(
+          new DragEvent(type, {
+            bubbles: true,
+            cancelable: true,
+            clientX: rect.left + rect.width / 2,
+            clientY: rect.top + rect.height / 2,
+            dataTransfer: new DataTransfer()
+          })
+        )
+      fire(src, 'dragstart')
+      await new Promise(r => setTimeout(r, 60)) // let react-dnd publish the drag source
+      fire(dstRow, 'dragenter')
+      fire(dstRow, 'dragover')
+      fire(dstRow, 'drop')
+      fire(src, 'dragend')
+      return true
+    },
+    { fromName, toName }
+  )
+}
+check('drag source and target rows found', await dragRowOnto(newFileName, newFolderName))
+await page.waitForTimeout(1000) // rename round-trip + watch debounce (250ms) + reload
+const movedRow = page.locator('[role="treeitem"]', { hasText: newFileName }).first()
+const folderRow = page.locator('[role="treeitem"]', { hasText: newFolderName }).first()
+check('moved file still listed in tree', await movedRow.isVisible())
+const fileLevel = Number(await movedRow.getAttribute('aria-level'))
+const folderLevel = Number(await folderRow.getAttribute('aria-level'))
+check('moved file nested one level under the folder', fileLevel === folderLevel + 1)
+
 // bring welcome.md back to the foreground so the autosave test below targets it
 await row.first().click()
 await page.waitForTimeout(300)

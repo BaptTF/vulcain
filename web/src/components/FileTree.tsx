@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
 import { useDropzone } from 'react-dropzone'
-import { Tree, type NodeApi, type RenameHandler, type TreeApi } from 'react-arborist'
+import { Tree, type MoveHandler, type NodeApi, type RenameHandler, type TreeApi } from 'react-arborist'
 import { toast } from 'sonner'
 import { downloadUrl, getTree, mkdir, remove, rename, touch, writeFileBase64, type TreeEntry } from '../api'
 import { subscribeWatch } from '../watch-client'
@@ -272,6 +272,24 @@ export default function FileTree({ ws, onOpen }: Props) {
     [discardTemp]
   )
 
+  const handleMove: MoveHandler<TreeNode> = useCallback(
+    async ({ dragIds, parentId }) => {
+      try {
+        for (const id of dragIds) {
+          if (id.startsWith('__new_')) continue
+          const base = id.slice(id.lastIndexOf('/') + 1)
+          const to = parentId ? `${parentId}/${base}` : base
+          if (to === id) continue
+          await rename(ws, id, to)
+        }
+      } catch (e: any) {
+        toast.error('Déplacement impossible', { description: String(e?.message ?? e) })
+      }
+      reload()
+    },
+    [ws, reload]
+  )
+
   const beginRename = useCallback((path: string) => {
     const tree = treeRef.current
     if (!tree) return
@@ -359,8 +377,7 @@ export default function FileTree({ ws, onOpen }: Props) {
               openByDefault={false}
               initialOpenState={Object.fromEntries(nodes.filter(n => n.type === 'dir').map(n => [n.id, true]))}
               onRename={handleRename}
-              disableDrag
-              disableDrop
+              onMove={handleMove}
             >
               {RowView}
             </Tree>
