@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { Group, Panel, Separator, useDefaultLayout } from 'react-resizable-panels'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { Group, Panel, Separator, useDefaultLayout, usePanelRef } from 'react-resizable-panels'
 import { Toaster } from 'sonner'
 import { getMeta, setTheme, type Meta } from './api'
 import FileTree from './components/FileTree'
@@ -38,8 +38,23 @@ export default function App() {
     setPanes(prev => ({ ...prev, [id]: !prev[id] }))
   }, [])
 
+  const agentPanelRef = usePanelRef()
+  const lastAgentSize = useRef(28)
+
   const centerVisible = panes.editor || panes.preview
-  const outerPanelIds = ['tree', ...(centerVisible ? ['center'] : []), ...(panes.agent ? ['agent'] : [])]
+  const outerPanelIds = ['tree', ...(centerVisible ? ['center'] : []), 'agent']
+
+  useLayoutEffect(() => {
+    const ref = agentPanelRef.current
+    if (!ref) return
+    if (panes.agent) {
+      ref.resize(`${lastAgentSize.current}%`)
+    } else {
+      if (!ref.isCollapsed()) lastAgentSize.current = ref.getSize().asPercentage
+      ref.collapse()
+    }
+  }, [panes.agent])
+
   const { defaultLayout: outerLayout, onLayoutChanged: onOuterLayoutChanged } = useDefaultLayout({
     id: 'vulcain.outer',
     panelIds: outerPanelIds
@@ -171,7 +186,7 @@ export default function App() {
         ))}
       </div>
 
-      <div className="main-panels">
+      <div className={`main-panels${panes.agent ? '' : ' agent-hidden'}`}>
         <Group
           orientation="horizontal"
           id="vulcain.outer"
@@ -203,11 +218,26 @@ export default function App() {
             </Panel>
           )}
           {centerVisible && panes.agent && <Separator />}
-          {panes.agent && (
-            <Panel id="agent" minSize="16" defaultSize="28">
-              <Chat ws={activeWs} onOpenFile={openFile} />
-            </Panel>
-          )}
+          <Panel
+            id="agent"
+            minSize="16"
+            defaultSize="28"
+            collapsible
+            collapsedSize={0}
+            panelRef={agentPanelRef}
+            onResize={(_size, _id, prevSize) => {
+              if (!prevSize) return
+              const ref = agentPanelRef.current
+              if (!ref) return
+              if (!panes.agent) {
+                if (!ref.isCollapsed()) ref.collapse()
+              } else if (ref.isCollapsed()) {
+                ref.expand()
+              }
+            }}
+          >
+            <Chat ws={activeWs} onOpenFile={openFile} />
+          </Panel>
         </Group>
       </div>
       <WorkspaceModal

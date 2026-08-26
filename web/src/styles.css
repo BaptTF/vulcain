@@ -153,6 +153,10 @@ button, input, textarea, select {
   min-height: 0;
 }
 
+.main-panels.agent-hidden [data-testid="agent"] {
+  display: none !important;
+}
+
 .panel-tree {
   height: 100%;
   display: flex;

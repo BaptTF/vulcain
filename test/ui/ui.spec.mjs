@@ -269,6 +269,19 @@ console.log(`  chat status: ${chatStatus}`)
 check('agent websocket connected (chat pret)', chatStatus === 'prêt')
 check('real agent greeted via ACP bridge', (await page.locator('.chat-messages').textContent())?.includes('fake-agent') === true)
 
+// hide/show the agent panel must not reconnect the agent (the panel is only
+// collapsed, so <Chat> stays mounted and the ACP socket stays open)
+const statusBefore = (await page.locator('.chat-status').textContent())?.trim() ?? ''
+await paneToggle('Agent').click()
+await page.waitForTimeout(300)
+await paneToggle('Agent').click()
+await page.waitForTimeout(150)
+const statusAfter = (await page.locator('.chat-status').textContent())?.trim() ?? ''
+check(
+  'agent panel hide/show keeps the connection (no reconnect)',
+  statusBefore === 'prêt' && statusAfter === 'prêt'
+)
+
 // Le bouton Envoyer doit au minimum afficher le message de l'utilisateur
 // (le bug historique etait un clic sans aucun effet quand la connexion pendait)
 const userBubbleBefore = await page.locator('.msg.user').count()
