@@ -358,6 +358,60 @@ const wsFailures = consoleErrors.filter(e => e.includes('/api/acp') || e.include
 check('no websocket connection errors', wsFailures.length === 0)
 if (wsFailures.length) console.log('  ->', wsFailures[0].slice(0, 160))
 
+// --- agent auto-reconnect + message queue ---
+// the fake agent exits on the magic prompt '__exit__', so the bridge closes the
+// websocket (4000 'agent exited') and the chat must reconnect on its own.
+await page.locator('.chat-input').fill('__exit__')
+await page.locator('.chat-input').press('Enter')
+let dropped = false
+for (let i = 0; i < 40; i++) {
+  await page.waitForTimeout(100)
+  const st = (await page.locator('.chat-status').textContent())?.trim() ?? ''
+  if (st !== 'prêt') {
+    dropped = true
+    break
+  }
+}
+check('agent disconnect detected after __exit__', dropped)
+
+// while offline, a message must be queued (not silently dropped)
+await page.locator('.chat-input').fill('message hors-ligne')
+await page.locator('.chat-input').press('Enter')
+let queued = false
+for (let i = 0; i < 10; i++) {
+  await page.waitForTimeout(100)
+  const all = (await page.locator('.chat-messages').textContent()) ?? ''
+  if (all.includes('en attente')) {
+    queued = true
+    break
+  }
+}
+check('message sent offline is queued (en attente)', queued)
+
+// the chat must reconnect by itself and get back to 'prêt'
+let backToReady = false
+for (let i = 0; i < 40; i++) {
+  await page.waitForTimeout(250)
+  const st = (await page.locator('.chat-status').textContent())?.trim() ?? ''
+  if (st === 'prêt') {
+    backToReady = true
+    break
+  }
+}
+check('agent auto-reconnects after a drop', backToReady)
+
+// the queued message is flushed once reconnected and the agent echoes it
+let flushed = false
+for (let i = 0; i < 20; i++) {
+  await page.waitForTimeout(250)
+  const last = (await page.locator('.chat-messages').textContent()) ?? ''
+  if (last.includes('echo: message hors-ligne')) {
+    flushed = true
+    break
+  }
+}
+check('queued message flushed after reconnect (echo received)', flushed)
+
 // --- workspace selector: fast switcher + open-folder explorer ---
 const wsTrigger = page.locator('.topbar .btn', { hasText: '▾' }).first()
 const wsItem = text => page.locator('.ws-menu .ws-menu-item', { hasText: text }).first()

@@ -51,6 +51,7 @@ export interface InitializeResult {
 interface Pending {
   resolve: (v: any) => void
   reject: (e: Error) => void
+  dispatched: boolean
 }
 
 type NotificationHandler = (method: string, params: any) => void
@@ -62,7 +63,7 @@ export class AcpClient {
   private handlers = new Set<NotificationHandler>()
   private requestHandler: ((method: string, params: any) => Promise<unknown>) | null = null
   private closeReason: string | null = null
-  private onCloseHandlers = new Set<(reason: string) => void>()
+  private onCloseHandlers = new Set<(reason: string, code: number) => void>()
 
   constructor(url: string) {
     this.ws = new WebSocket(url)
@@ -79,7 +80,7 @@ export class AcpClient {
     this.ws.onclose = ev => {
       const reason = ev.reason?.trim() || `websocket fermé (${ev.code})`
       this.failAllPending(reason)
-      for (const fn of this.onCloseHandlers) fn(reason)
+      for (const fn of this.onCloseHandlers) fn(reason, ev.code)
     }
     this.ws.onerror = () => {
       this.failAllPending('erreur websocket')
@@ -89,7 +90,9 @@ export class AcpClient {
   private failAllPending(reason: string): void {
     if (this.closeReason === null) this.closeReason = reason
     for (const [, p] of this.pending) {
-      p.reject(new Error(this.closeReason))
+      const err = new Error(this.closeReason) as Error & { dispatched?: boolean }
+      err.dispatched = p.dispatched
+      p.reject(err)
     }
     this.pending.clear()
   }
@@ -104,7 +107,7 @@ export class AcpClient {
     })
   }
 
-  onClosed(fn: (reason: string) => void): void {
+  onClosed(fn: (reason: string, code: number) => void): void {
     this.onCloseHandlers.add(fn)
   }
 
@@ -139,18 +142,27 @@ export class AcpClient {
     }
   }
 
-  private sendRaw(obj: unknown): void {
-    if (this.ws.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify(obj))
+  private sendRaw(obj: unknown): boolean {
+    if (this.ws.readyState !== WebSocket.OPEN) return false
+    try {
+      this.ws.send(JSON.stringify(obj))
+      return true
+    } catch {
+      return false
+    }
   }
 
   request(method: string, params?: unknown): Promise<any> {
     const id = this.nextId++
     if (this.closeReason !== null || this.ws.readyState >= WebSocket.CLOSING) {
-      return Promise.reject(new Error(this.closeReason ?? 'websocket fermé'))
+      const err = new Error(this.closeReason ?? 'websocket fermé') as Error & { dispatched?: boolean }
+      err.dispatched = false
+      return Promise.reject(err)
     }
     return new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject })
-      this.sendRaw({ jsonrpc: '2.0', id, method, params })
+      const p: Pending = { resolve, reject, dispatched: false }
+      this.pending.set(id, p)
+      p.dispatched = this.sendRaw({ jsonrpc: '2.0', id, method, params })
     })
   }
 

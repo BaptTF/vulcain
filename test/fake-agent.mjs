@@ -45,6 +45,9 @@ rl.on('line', line => {
 
   if (method === 'session/prompt') {
     const text = (params.prompt ?? []).map(b => b.text ?? '').join('')
+    if (text === '__exit__') {
+      process.exit(0)
+    }
     send({
       jsonrpc: '2.0',
       method: 'session/update',

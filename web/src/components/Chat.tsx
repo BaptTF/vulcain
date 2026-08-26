@@ -32,22 +32,68 @@ type DistributiveOmit<T, K extends keyof T> = T extends unknown ? Omit<T, K> : n
 
 export default function Chat({ ws, onOpenFile }: Props) {
   const [client, setClient] = useState<AcpClient | null>(null)
-  const [status, setStatus] = useState<'connecting' | 'ready' | 'working' | 'error'>('connecting')
+  const [status, setStatus] = useState<'connecting' | 'reconnecting' | 'ready' | 'working' | 'error'>('connecting')
   const [items, setItems] = useState<Item[]>([])
   const [input, setInput] = useState('')
   const [commands, setCommands] = useState<{ name: string; description: string }[]>([])
   const [expandedTools, setExpandedTools] = useState<Record<string, boolean>>({})
-  const [retry, setRetry] = useState(0)
   const sessionIdRef = useRef<string | null>(null)
   const lastUserText = useRef('')
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const workingRef = useRef(false)
+  const pendingRef = useRef<string[]>([])
+  const [queued, setQueued] = useState(0)
+  const clientRef = useRef<AcpClient | null>(null)
+  const forceReconnectRef = useRef<(() => void) | null>(null)
 
   const storageKey = `vulcain.chat.${ws}`
 
   const pushItem = useCallback((item: DistributiveOmit<Item, 'id'> & { id?: number }) => {
     setItems(prev => [...prev, { ...(item as any), id: item.id ?? itemId++ }])
   }, [])
+
+  const updateClient = useCallback((c: AcpClient | null) => {
+    clientRef.current = c
+    setClient(c)
+  }, [])
+
+  const runPrompt = useCallback(
+    async (text: string): Promise<void> => {
+      const c = clientRef.current
+      const sessionId = sessionIdRef.current
+      if (!c || !sessionId) {
+        pendingRef.current.unshift(text)
+        setQueued(pendingRef.current.length)
+        return
+      }
+      workingRef.current = true
+      setStatus('working')
+      try {
+        lastUserText.current = text
+        await c.prompt(sessionId, text)
+      } catch (e: any) {
+        if (e?.dispatched === false) {
+          pendingRef.current.unshift(text)
+          setQueued(pendingRef.current.length)
+          pushItem({ kind: 'system', text: 'Message remis en attente (non envoyé avant la coupure)' })
+        } else {
+          pushItem({ kind: 'system', text: `Réponse interrompue : ${e.message}` })
+        }
+      } finally {
+        workingRef.current = false
+      }
+    },
+    [pushItem]
+  )
+
+  const drain = useCallback(async () => {
+    while (!workingRef.current && clientRef.current && pendingRef.current.length > 0) {
+      const text = pendingRef.current.shift()!
+      setQueued(pendingRef.current.length)
+      await runPrompt(text)
+    }
+    if (clientRef.current && !workingRef.current) setStatus('ready')
+  }, [runPrompt])
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -118,23 +164,77 @@ export default function Chat({ ws, onOpenFile }: Props) {
     setStatus('connecting')
     setItems([])
     setCommands([])
+    setQueued(0)
+    pendingRef.current = []
+    workingRef.current = false
+
     let disposed = false
-    let currentClient: AcpClient | null = null
+    let current: AcpClient | null = null
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null
+    let attempts = 0
+    let connected = false
+    let closeHandled = false
+
+    const pushSystem = (t: string) => {
+      if (!disposed) pushItem({ kind: 'system', text: t })
+    }
+
+    const isFatal = (code: number, reason: string) =>
+      code === 4004 || reason.includes('agent introuvable') || reason.includes('spawn')
+
+    const clearTimer = () => {
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer)
+        reconnectTimer = null
+      }
+    }
+
+    const scheduleReconnect = () => {
+      if (disposed || reconnectTimer) return
+      const delay = Math.min(1000 * 2 ** attempts, 30000)
+      attempts += 1
+      setStatus('reconnecting')
+      pushSystem(`Connexion perdue — nouvelle tentative dans ${Math.round(delay / 1000)} s`)
+      reconnectTimer = setTimeout(() => {
+        reconnectTimer = null
+        void connect()
+      }, delay)
+    }
+
+    forceReconnectRef.current = () => {
+      clearTimer()
+      void connect()
+    }
 
     async function connect(): Promise<void> {
+      if (disposed) return
+      setStatus(attempts > 0 ? 'reconnecting' : 'connecting')
       sessionIdRef.current = localStorage.getItem(storageKey)
       const protocol = location.protocol === 'https:' ? 'wss' : 'ws'
       const c = new AcpClient(`${protocol}://${location.host}/api/acp?ws=${encodeURIComponent(ws)}`)
-      currentClient = c
+      current = c
+      updateClient(c)
 
       c.onNotification((method, params) => {
         if (method === 'session/update') applyUpdate(params.update)
       })
 
-      c.onClosed(reason => {
+      c.onClosed((reason, code) => {
         if (disposed) return
-        setStatus('error')
-        pushItem({ kind: 'system', text: `Agent déconnecté : ${reason}` })
+        closeHandled = true
+        workingRef.current = false
+        if (current === c) {
+          current = null
+          updateClient(null)
+        }
+        if (isFatal(code, reason)) {
+          setStatus('error')
+          pushSystem(`Agent déconnecté : ${reason}`)
+          return
+        }
+        if (connected) pushSystem(`Connexion à l'agent perdue : ${reason}`)
+        connected = false
+        scheduleReconnect()
       })
 
       c.onRequest(async (method, params) => {
@@ -151,10 +251,7 @@ export default function Chat({ ws, onOpenFile }: Props) {
         await c.waitOpen()
         const init: InitializeResult = await c.initialize()
         if (init.agentInfo?.name) {
-          pushItem({
-            kind: 'system',
-            text: `${init.agentInfo.name}${init.agentInfo.version ? ' v' + init.agentInfo.version : ''}`
-          })
+          pushSystem(`${init.agentInfo.name}${init.agentInfo.version ? ' v' + init.agentInfo.version : ''}`)
         }
         const cwd = '.'
         let sessionId = sessionIdRef.current
@@ -176,70 +273,91 @@ export default function Chat({ ws, onOpenFile }: Props) {
           c.close()
           return
         }
-        setClient(c)
+        connected = true
+        attempts = 0
         setStatus('ready')
+        await drain()
       } catch (e: any) {
-        if (disposed) return
-        setStatus('error')
-        pushItem({ kind: 'system', text: `Connexion à l'agent impossible : ${e.message}` })
+        if (disposed || closeHandled) return
+        if (current === c) {
+          current = null
+          updateClient(null)
+        }
+        try {
+          c.close()
+        } catch {}
+        if (connected) {
+          connected = false
+          pushSystem(`Connexion perdue avant la réponse : ${e.message}`)
+        }
+        scheduleReconnect()
       }
     }
 
-    connect()
+    void connect()
 
     return () => {
       disposed = true
-      currentClient?.close()
-      setClient(null)
+      clearTimer()
+      forceReconnectRef.current = null
+      current?.close()
+      updateClient(null)
     }
-  }, [ws, storageKey, applyUpdate, pushItem, retry])
+  }, [ws, storageKey, applyUpdate, pushItem, drain, updateClient])
 
   const send = useCallback(async () => {
-    if (!client || !sessionIdRef.current || workingRef.current) return
     const text = input.trim()
     if (!text) return
     setInput('')
     lastUserText.current = text
     pushItem({ kind: 'user', text })
-    workingRef.current = true
-    setStatus('working')
-    try {
-      await client.prompt(sessionIdRef.current, text)
-    } catch (e: any) {
-      pushItem({ kind: 'system', text: `Erreur : ${e.message}` })
-    } finally {
-      workingRef.current = false
-      setStatus('ready')
+    pendingRef.current.push(text)
+    setQueued(pendingRef.current.length)
+    if (!clientRef.current || !sessionIdRef.current) {
+      pushItem({ kind: 'system', text: 'Message mis en attente (agent hors ligne)' })
+      return
     }
-  }, [client, input, pushItem])
+    if (workingRef.current) return
+    void drain()
+  }, [input, pushItem, drain])
 
   const cancel = useCallback(() => {
-    if (client && sessionIdRef.current) {
-      client.cancel(sessionIdRef.current)
+    if (clientRef.current && sessionIdRef.current) {
+      clientRef.current.cancel(sessionIdRef.current)
     }
-  }, [client])
+  }, [])
 
   const newChat = useCallback(async () => {
-    if (!client) return
+    if (!clientRef.current) return
     localStorage.removeItem(storageKey)
     sessionIdRef.current = null
     setItems([])
     try {
-      const res = await client.newSession('.')
+      const res = await clientRef.current.newSession('.')
       sessionIdRef.current = res.sessionId
       localStorage.setItem(storageKey, res.sessionId)
       setStatus(workingRef.current ? 'working' : 'ready')
     } catch (e: any) {
       pushItem({ kind: 'system', text: `Nouvelle session impossible : ${e.message}` })
     }
-  }, [client, storageKey, pushItem])
+  }, [storageKey, pushItem])
 
   const hints = input.startsWith('/')
     ? commands.filter(cmd => cmd.name.startsWith(input.slice(1).split(' ')[0]))
     : []
 
   const statusLabel =
-    status === 'connecting' ? 'connexion…' : status === 'ready' ? 'prêt' : status === 'working' ? 'en cours…' : 'erreur'
+    status === 'connecting'
+      ? 'connexion…'
+      : status === 'reconnecting'
+        ? queued > 0
+          ? `hors-ligne · ${queued} en attente`
+          : 'reconnexion…'
+        : status === 'ready'
+          ? 'prêt'
+          : status === 'working'
+            ? 'en cours…'
+            : 'erreur'
 
   return (
     <div className="panel-chat">
@@ -247,9 +365,9 @@ export default function Chat({ ws, onOpenFile }: Props) {
         Agent
         <span className={`chat-status ${status}`}>{statusLabel}</span>
         <div className="spacer" />
-        {status === 'error' && (
-          <button className="btn" onClick={() => setRetry(r => r + 1)}>
-            Reconnecter
+        {(status === 'error' || status === 'reconnecting') && (
+          <button className="btn" onClick={() => forceReconnectRef.current?.()}>
+            {status === 'error' ? 'Reconnecter' : 'Réessayer'}
           </button>
         )}
         <button className="btn" onClick={newChat} disabled={!client}>
@@ -307,7 +425,7 @@ export default function Chat({ ws, onOpenFile }: Props) {
               Stop
             </button>
           ) : (
-            <button className="btn primary" onClick={() => void send()} disabled={!client || !input.trim()}>
+            <button className="btn primary" onClick={() => void send()} disabled={!input.trim()}>
               Envoyer
             </button>
           )}
