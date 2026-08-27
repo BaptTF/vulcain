@@ -11,6 +11,10 @@ const browser = await chromium.launch()
 const page = await browser.newPage()
 const consoleErrors = []
 const pageErrors = []
+let treeFetches = 0
+page.on('request', r => {
+  if (r.url().includes('/api/fs/tree')) treeFetches++
+})
 page.on('console', m => {
   if (m.type() === 'error') consoleErrors.push(m.text())
 })
@@ -125,6 +129,45 @@ check('moved file still listed in tree', await movedRow.isVisible())
 const fileLevel = Number(await movedRow.getAttribute('aria-level'))
 const folderLevel = Number(await folderRow.getAttribute('aria-level'))
 check('moved file nested one level under the folder', fileLevel === folderLevel + 1)
+
+// --- optimistic move: the file must land in the folder before the rename API resolves ---
+const moveFileName = `move-${Date.now()}.md`
+await page.evaluate(async path => {
+  const ws = localStorage.getItem('vulcain.ws') || ''
+  const r = await fetch('/api/fs/file', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ws, path, content: 'move me\n' })
+  })
+  if (!r.ok) throw new Error('PUT failed: ' + r.status)
+}, moveFileName)
+await page.waitForTimeout(700) // watch debounce (250ms) + reload
+check('optimistic move source file listed', await page.locator('[role="treeitem"]', { hasText: moveFileName }).first().isVisible())
+
+// delay the rename endpoint: only an optimistic client-side move can nest the row this early
+await page.route('**/api/fs/rename', async route => {
+  await new Promise(r => setTimeout(r, 1000))
+  await route.continue()
+})
+await dragStart(moveFileName)
+await dragHover(moveFileName, newFolderName)
+await dragDrop(moveFileName, newFolderName)
+let nestedFast = false
+for (let i = 0; i < 10; i++) {
+  await page.waitForTimeout(50)
+  const row = page.locator('[role="treeitem"]', { hasText: moveFileName }).first()
+  if (!(await row.count())) continue
+  const lvl = Number(await row.getAttribute('aria-level'))
+  const dstLvl = Number(await folderRow.getAttribute('aria-level'))
+  if (lvl === dstLvl + 1) {
+    nestedFast = true
+    break
+  }
+}
+check('moved file appears nested before rename resolves (optimistic)', nestedFast)
+await page.unroute('**/api/fs/rename')
+await page.waitForTimeout(1500) // let the delayed rename land + watch reconcile
+check('optimistic move reconciled on disk', await page.locator('[role="treeitem"]', { hasText: moveFileName }).first().isVisible())
 
 // bring welcome.md back to the foreground so the autosave test below targets it
 await row.first().click()
@@ -275,6 +318,16 @@ check(
     (await boxVisible('.cm-editor')) &&
     (await boxVisible('.panel-center'))
 )
+
+// --- tree hide/show must not refetch: <FileTree> stays mounted (like the agent) ---
+await page.waitForTimeout(500) // let any pending watch debounce settle
+const treeFetchesBefore = treeFetches
+await paneToggle('Tree').click()
+await page.waitForTimeout(300)
+await paneToggle('Tree').click()
+await page.waitForTimeout(300)
+check('tree hide/show does not refetch the file tree', treeFetches === treeFetchesBefore)
+check('tree reappears instantly after toggle', await boxVisible('.panel-tree'))
 
 // --- layout persists across reload ---
 await paneToggle('Agent').click()

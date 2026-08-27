@@ -40,6 +40,8 @@ export default function App() {
 
   const agentPanelRef = usePanelRef()
   const lastAgentSize = useRef(28)
+  const treePanelRef = usePanelRef()
+  const lastTreeSize = useRef(20)
 
   const centerVisible = panes.editor || panes.preview
   const outerPanelIds = ['tree', ...(centerVisible ? ['center'] : []), 'agent']
@@ -54,6 +56,17 @@ export default function App() {
       ref.collapse()
     }
   }, [panes.agent])
+
+  useLayoutEffect(() => {
+    const ref = treePanelRef.current
+    if (!ref) return
+    if (panes.tree) {
+      ref.resize(`${lastTreeSize.current}%`)
+    } else {
+      if (!ref.isCollapsed()) lastTreeSize.current = ref.getSize().asPercentage
+      ref.collapse()
+    }
+  }, [panes.tree])
 
   const { defaultLayout: outerLayout, onLayoutChanged: onOuterLayoutChanged } = useDefaultLayout({
     id: 'vulcain.outer',
@@ -186,20 +199,35 @@ export default function App() {
         ))}
       </div>
 
-      <div className={`main-panels${panes.agent ? '' : ' agent-hidden'}`}>
+      <div className={`main-panels${panes.tree ? '' : ' tree-hidden'}${panes.agent ? '' : ' agent-hidden'}`}>
         <Group
           orientation="horizontal"
           id="vulcain.outer"
           defaultLayout={outerLayout}
           onLayoutChanged={onOuterLayoutChanged}
         >
-          {panes.tree && (
-            <Panel id="tree" minSize="12" defaultSize="20">
-              <div className="panel-tree">
-                <FileTree ws={activeWs} onOpen={openFile} />
-              </div>
-            </Panel>
-          )}
+          <Panel
+            id="tree"
+            minSize="12"
+            defaultSize="20"
+            collapsible
+            collapsedSize={0}
+            panelRef={treePanelRef}
+            onResize={(_size, _id, prevSize) => {
+              if (!prevSize) return
+              const ref = treePanelRef.current
+              if (!ref) return
+              if (!panes.tree) {
+                if (!ref.isCollapsed()) ref.collapse()
+              } else if (ref.isCollapsed()) {
+                ref.expand()
+              }
+            }}
+          >
+            <div className="panel-tree">
+              <FileTree ws={activeWs} onOpen={openFile} />
+            </div>
+          </Panel>
           {panes.tree && centerVisible && <Separator />}
           {centerVisible && (
             <Panel id="center" minSize="10">

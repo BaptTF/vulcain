@@ -98,6 +98,15 @@ function removeById(list: TreeNode[], id: string): TreeNode[] | null {
   return null
 }
 
+function moveNode(list: TreeNode[], id: string, targetParent: string): TreeNode[] {
+  const node = findNodeById(list, id)
+  if (!node) return list
+  const rest = removeById(list, id)
+  if (!rest) return list
+  if (!targetParent) return [...rest, node]
+  return insertTemp(rest, targetParent, node) ?? rest
+}
+
 export default function FileTree({ ws, onOpen }: Props) {
   const [nodes, setNodes] = useState<TreeNode[]>([])
   const [size, setSize] = useState({ w: 200, h: 400 })
@@ -274,18 +283,28 @@ export default function FileTree({ ws, onOpen }: Props) {
 
   const handleMove: MoveHandler<TreeNode> = useCallback(
     async ({ dragIds, parentId }) => {
-      try {
-        for (const id of dragIds) {
-          if (id.startsWith('__new_')) continue
+      const targets = dragIds
+        .filter(id => !id.startsWith('__new_'))
+        .map(id => {
           const base = id.slice(id.lastIndexOf('/') + 1)
           const to = parentId ? `${parentId}/${base}` : base
-          if (to === id) continue
+          return { id, to }
+        })
+        .filter(({ id, to }) => to !== id)
+      if (targets.length === 0) return
+      setNodes(prev => {
+        let next = prev
+        for (const { id } of targets) next = moveNode(next, id, parentId ?? '')
+        return next
+      })
+      try {
+        for (const { id, to } of targets) {
           await rename(ws, id, to)
         }
       } catch (e: any) {
         toast.error('Déplacement impossible', { description: String(e?.message ?? e) })
+        reload()
       }
-      reload()
     },
     [ws, reload]
   )

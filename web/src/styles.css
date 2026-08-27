@@ -159,6 +159,10 @@ button, input, textarea, select {
   display: none !important;
 }
 
+.main-panels.tree-hidden [data-testid="tree"] {
+  display: none !important;
+}
+
 .panel-tree {
   height: 100%;
   display: flex;
