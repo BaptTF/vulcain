@@ -10,6 +10,9 @@
     "build": "tsc && vite build"
   },
   "dependencies": {
+    "@ai-sdk/react": "^4.0.90",
+    "@assistant-ui/ai-sdk": "^0.0.3",
+    "@assistant-ui/react": "^0.15.17",
     "@codemirror/commands": "^6.7.1",
     "@codemirror/lang-json": "^6.0.1",
     "@codemirror/lang-markdown": "^6.3.1",
@@ -23,6 +26,7 @@
     "@myriaddreamin/typst.ts": "0.8.0-rc3",
     "@radix-ui/react-context-menu": "^2.3.7",
     "@radix-ui/react-dropdown-menu": "^2.1.24",
+    "ai": "^7.0.87",
     "codemirror": "^6.0.1",
     "dompurify": "^3.2.3",
     "highlight.js": "^11.11.0",

@@ -264,7 +264,7 @@ export default function App() {
               }
             }}
           >
-            <Chat ws={activeWs} onOpenFile={openFile} />
+            <Chat key={activeWs} ws={activeWs} onOpenFile={openFile} />
           </Panel>
         </Group>
       </div>

@@ -3,7 +3,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { expandHome, type VulcainConfig } from './config.js'
 
-function piAgentDir(): string {
+export function piAgentDir(): string {
   return process.env.PI_CODING_AGENT_DIR || path.join(os.homedir(), '.pi', 'agent')
 }
 

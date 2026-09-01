@@ -19,7 +19,7 @@ RUN apt-get update \
 
 ENV VULCAIN_HOME=/tmp/vulcain-test
 ENV VULCAIN_WORKSPACES=/tmp/vulcain-test/workspaces
-ENV VULCAIN_AGENT_CMD=/app/test/fake-agent.mjs
+ENV VULCAIN_CHAT_BACKEND=fake
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
 # Playwright + chromium with its system deps (headless shell only is enough)

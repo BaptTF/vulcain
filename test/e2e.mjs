@@ -34,6 +34,43 @@ function reqJson(method, path, body) {
   })
 }
 
+async function chatStream(payload) {
+  const body = JSON.stringify(payload)
+  return new Promise((resolve, reject) => {
+    const r = http.request(
+      {
+        host: '127.0.0.1',
+        port: PORT,
+        path: '/api/chat',
+        method: 'POST',
+        agent: false,
+        headers: { 'content-type': 'application/json' }
+      },
+      res => {
+        let buf = ''
+        const chunks = []
+        res.on('data', c => {
+          buf += c.toString()
+          let idx
+          while ((idx = buf.indexOf('\n')) >= 0) {
+            const line = buf.slice(0, idx).trim()
+            buf = buf.slice(idx + 1)
+            if (!line.startsWith('data: ')) continue
+            const payload = line.slice(6).trim()
+            if (payload === '[DONE]') continue
+            try {
+              chunks.push(JSON.parse(payload))
+            } catch {}
+          }
+        })
+        res.on('end', () => resolve({ status: res.statusCode, chunks }))
+      }
+    )
+    r.on('error', reject)
+    r.end(body)
+  })
+}
+
 const clashDir = `__clash_dir_${Date.now()}`
 await reqJson('POST', '/api/fs/mkdir', { ws: 'Notes', path: clashDir })
 const touchClash = await reqJson('POST', '/api/fs/touch', { ws: 'Notes', path: clashDir })
@@ -77,10 +114,9 @@ watch.on('message', d => {
 
 await new Promise(r => setTimeout(r, 500))
 
-const { default: fetch } = await import('node:http')
 function putFile(content) {
   return new Promise((resolve, reject) => {
-    const req = fetch.request(
+    const req = http.request(
       { host: '127.0.0.1', port: PORT, path: '/api/fs/file', method: 'PUT', headers: { 'content-type': 'application/json' } },
       res => resolve(res.statusCode)
     )
@@ -93,88 +129,48 @@ check('watch: socket opened', watchOpen)
 await putFile('trigger')
 await new Promise(r => setTimeout(r, 800))
 
-const acp = new WebSocket(`ws://127.0.0.1:${PORT}/api/acp?ws=Notes`)
-const pending = new Map()
-let nextId = 1
-const updates = []
-
-acp.on('message', line => {
-  const msg = JSON.parse(line.toString())
-  if (msg.id !== undefined && (msg.result !== undefined || msg.error !== undefined)) {
-    const p = pending.get(msg.id)
-    if (p) {
-      pending.delete(msg.id)
-      p(msg)
-    }
-  }
-  if (msg.method === 'session/update') updates.push(msg.params.update)
-})
-
-function rpc(method, params) {
-  return new Promise(resolve => {
-    const id = nextId++
-    pending.set(id, resolve)
-    acp.send(JSON.stringify({ jsonrpc: '2.0', id, method, params }))
-  })
-}
-
-acp.on('open', async () => {})
-
-await withTimeout(new Promise(r => acp.once('open', r)), 5000, 'acp open')
-check('acp: websocket opened', true)
-await new Promise(r => setTimeout(r, 400))
-
-// the bridge syncs the configured SYSTEM.md into pi's agent dir on connect
+// the server syncs the configured SYSTEM.md into pi's agent dir at boot
 {
   const { default: fs } = await import('node:fs')
   const { default: os } = await import('node:os')
   const { default: path } = await import('node:path')
   const agentDir = process.env.PI_CODING_AGENT_DIR || path.join(os.homedir(), '.pi', 'agent')
-  const sp = path.join(agentDir, 'SYSTEM.md')
-  check('acp: SYSTEM.md synced to pi agent dir', fs.existsSync(sp))
+  check('chat: SYSTEM.md synced to pi agent dir', fs.existsSync(path.join(agentDir, 'SYSTEM.md')))
 }
 
-const init = await withTimeout(rpc('initialize', { protocolVersion: 1, clientCapabilities: {} }), 5000, 'init')
-check('acp: initialize -> fake-agent', init.result?.agentInfo?.name === 'fake-agent')
-
-const sess = await withTimeout(rpc('session/new', { cwd: '.', mcpServers: [] }), 5000, 'session/new')
-check('acp: session/new returns id', typeof sess.result?.sessionId === 'string')
-
-const cwdProbe = await withTimeout(
-  new Promise(resolve => {
-    const orig = rpc
-    void orig
-    resolve(null)
-  }),
-  10,
-  'noop'
+const stream = await withTimeout(
+  chatStream({ workspace: 'Notes', messages: [{ role: 'user', content: 'bonjour' }] }),
+  10000,
+  'chat stream'
 )
-void cwdProbe
+check('chat: POST /api/chat returns 200', stream.status === 200)
+const textDelta = stream.chunks.filter(c => c.type === 'text-delta').map(c => c.delta).join('')
+check('chat: text streamed (echo)', textDelta === 'echo: bonjour')
+check(
+  'chat: tool call part received',
+  stream.chunks.some(c => c.type === 'tool-input-available' && c.toolName === 'read')
+)
+check(
+  'chat: tool result part received',
+  stream.chunks.some(c => c.type === 'tool-output-available' && c.output === 'file contents here')
+)
+check('chat: finish part received', stream.chunks.some(c => c.type === 'finish'))
 
-const promptId = nextId++
-let permissionSeen = null
-const promptPromise = new Promise(resolve => {
-  pending.set(promptId, resolve)
-})
-acp.send(JSON.stringify({ jsonrpc: '2.0', id: promptId, method: 'session/prompt', params: { sessionId: sess.result.sessionId, prompt: [{ type: 'text', text: 'bonjour' }] } }))
+const commands = await reqJson('GET', '/api/chat/commands?workspace=Notes')
+check(
+  'chat: commands endpoint lists slash commands',
+  commands.status === 200 && Array.isArray(commands.body?.commands) && commands.body.commands.some(c => c.name === 'model')
+)
 
-await new Promise(r => setTimeout(r, 600))
-const chunks = updates.filter(u => u.sessionUpdate === 'agent_message_chunk')
-check('acp: streaming chunk received', chunks.some(u => u.content?.text === 'echo: bonjour'))
-check('acp: tool_call received', updates.some(u => u.sessionUpdate === 'tool_call'))
+const reset = await reqJson('POST', '/api/chat/reset', { workspace: 'Notes' })
+check('chat: reset endpoint ok', reset.status === 200 && reset.body?.ok)
 
-acp.on('message', line => {
-  const msg = JSON.parse(line.toString())
-  if (msg.method === 'session/request_permission') {
-    permissionSeen = msg
-    acp.send(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { outcome: { outcome: 'selected', optionId: 'allow' } } }))
-  }
-})
+const badWs = await chatStream({ workspace: 'Nope', messages: [{ role: 'user', content: 'x' }] })
+check('chat: unknown workspace rejected', badWs.status === 400)
 
-await promptPromise.then(res => check('acp: prompt resolves end_turn', res.result?.stopReason === 'end_turn'))
-void permissionSeen
+const noText = await chatStream({ workspace: 'Notes', messages: [{ role: 'user', content: '' }] })
+check('chat: empty user message rejected', noText.status === 400)
 
-acp.close()
 watch.close()
 await new Promise(r => setTimeout(r, 300))
 

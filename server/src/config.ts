@@ -13,7 +13,7 @@ export interface VulcainConfig {
   workspaces: WorkspaceDef[]
   configWorkspace: string
   llm?: { provider?: Record<string, unknown> }
-  agent: { command: string[]; args?: string[]; systemPrompt?: string }
+  agent: { systemPrompt?: string }
   tools: {
     camofox?: { baseUrl: string; accessKey?: string }
     webSearch?: {
@@ -43,7 +43,7 @@ const DEFAULTS: VulcainConfig = {
   server: { host: '127.0.0.1', port: 7331 },
   workspaces: [],
   configWorkspace: path.join(vulcainHome(), 'config'),
-  agent: { command: ['pi-acp'], args: [] },
+  agent: {},
   tools: {}
 }
 

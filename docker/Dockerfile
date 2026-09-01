@@ -22,7 +22,7 @@ ENV VULCAIN_WORKSPACES=/data/workspaces
 ENV VULCAIN_HOST=0.0.0.0
 ENV PI_SKIP_VERSION_CHECK=1
 
-RUN npm install -g --ignore-scripts @earendil-works/pi-coding-agent pi-acp \
+RUN npm install -g --ignore-scripts @earendil-works/pi-coding-agent \
   && npm cache clean --force
 
 ARG TYPST_VERSION=0.15.1

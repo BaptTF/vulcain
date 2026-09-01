@@ -6,7 +6,7 @@ import fastifyWebsocket from '@fastify/websocket'
 import { loadConfig } from './config.js'
 import { registerFsApi } from './fs-api.js'
 import { registerWatchApi } from './watch.js'
-import { registerAcpBridge } from './acp-bridge.js'
+import { registerChat } from './chat.js'
 import { syncPiModels, syncSystemPrompt } from './pisync.js'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
@@ -24,7 +24,7 @@ async function main(): Promise<void> {
   await app.register(fastifyWebsocket, { options: { maxPayload: 64 * 1024 * 1024 } })
   registerFsApi(app)
   registerWatchApi(app)
-  registerAcpBridge(app)
+  registerChat(app)
 
   app.setErrorHandler((err, req, reply) => {
     const status = (err as any).statusCode ?? 500

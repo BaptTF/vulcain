@@ -8,14 +8,13 @@ const repoRoot = path.dirname(path.dirname(fileURLToPath(import.meta.url)))
 const home = process.env.VULCAIN_HOME || '/tmp/vulcain-test'
 const port = process.env.VULCAIN_PORT || '7399'
 const baseUrl = process.env.BASE_URL || `http://127.0.0.1:${port}`
-const configPath = path.join(home, 'config', 'config.json')
-const fakeAgent = path.join(repoRoot, 'test', 'fake-agent.mjs')
 
 const env = {
   ...process.env,
   VULCAIN_HOME: home,
   VULCAIN_WORKSPACES: path.join(home, 'workspaces'),
   VULCAIN_PORT: port,
+  VULCAIN_CHAT_BACKEND: 'fake',
   BASE_URL: baseUrl,
   PLAYWRIGHT_BROWSERS_PATH: process.env.PLAYWRIGHT_BROWSERS_PATH || undefined
 }
@@ -43,15 +42,10 @@ function waitForServer(timeoutMs) {
   })
 }
 
-// fresh home so bootstrap writes the config with the fake agent
+// fresh home so bootstrap writes the config
 fs.rmSync(home, { recursive: true, force: true })
 const bootstrapCode = await run('node', [path.join(repoRoot, 'scripts', 'bootstrap.mjs')])
 if (bootstrapCode !== 0) process.exit(bootstrapCode ?? 1)
-
-// force the agent command toward the fake agent (e2e / ui suite)
-const cfg = JSON.parse(fs.readFileSync(configPath, 'utf8'))
-cfg.agent = { command: ['node', fakeAgent], args: [] }
-fs.writeFileSync(configPath, JSON.stringify(cfg, null, 2) + '\n')
 
 // build the UI test fixture in a fresh workspace each run
 const notesWs = path.join(home, 'workspaces', 'notes')

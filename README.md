@@ -1,9 +1,9 @@
 # Vulcain
 
-Éditeur de notes web minimaliste : markdown (façon Obsidian) + PDF propres via Typst, avec un agent IA branché par ACP ([pi](https://github.com/earendil-works/pi) via l'adaptateur `pi-acp`), recherche web et navigateur stealth ([camofox](https://github.com/jo-inc/camofox-browser)).
+Éditeur de notes web minimaliste : markdown (façon Obsidian) + PDF propres via Typst, avec un agent IA [pi](https://github.com/earendil-works/pi) embarqué (chat assistant-ui), recherche web et navigateur stealth ([camofox](https://github.com/jo-inc/camofox-browser)).
 
 ```
-Arbre fichiers │ Éditeur CodeMirror 6 (+ preview md/typst, export PDF) │ Chat agent (ACP)
+Arbre fichiers │ Éditeur CodeMirror 6 (+ preview md/typst, export PDF) │ Chat agent (assistant-ui)
 ```
 
 ## Démarrage rapide (dev)
@@ -19,7 +19,7 @@ npm run dev              # serveur :7331 + vite :5173 (ouvrir http://localhost:5
 Installer pi et s'authentifier une fois (ou passer `--install-pi` au bootstrap) :
 
 ```bash
-npm i -g --ignore-scripts @earendil-works/pi-coding-agent pi-acp
+npm i -g --ignore-scripts @earendil-works/pi-coding-agent
 pi   # /login pour choisir un provider (ou utiliser bifrost, voir config)
 ```
 
@@ -32,7 +32,7 @@ cd docker
 docker compose up --build -d     # http://localhost:7331
 ```
 
-Volumes persistants : `/data/workspaces` (notes), `/data/.vulcain` (config), `/data/.pi` (sessions/auth pi). pi et pi-acp sont embarqués dans l'image ; aucun appel réseau au démarrage.
+Volumes persistants : `/data/workspaces` (notes), `/data/.vulcain` (config), `/data/.pi` (sessions/auth pi). pi est embarqué dans l'image ; aucun appel réseau au démarrage.
 
 Point camofox depuis le conteneur : mettre dans config.json `tools.camofox.baseUrl` (ex. `http://host.docker.internal:9377` si exposé sur l'hôte).
 
@@ -46,8 +46,7 @@ Source de vérité unique. Le bouton **Config** de la topbar ouvre ce dossier co
 | `workspaces` | liste `{name, path}` — le serveur ne touche QUE ces racines (+ workspace config) |
 | `configWorkspace` | chemin du dossier ouvert par le bouton Config |
 | `llm.provider` | génère `~/.pi/agent/models.json` au boot (baseUrl/api/apiKey/models) |
-| `agent.command` | commande ACP spawnée par session chat, cwd = racine du workspace. Remplaçable par n'importe quel agent ACP (ex. `["npx","-y","@zed-industries/claude-agent-acp"]`) |
-| `agent.systemPrompt` | chemin vers le `SYSTEM.md` du système (défaut : `<configWorkspace>/SYSTEM.md`). Synchronisé vers `~/.pi/agent/SYSTEM.md` au boot et à chaque connexion chat, pour remplacer le system prompt par défaut « coding agent » de pi |
+| `agent.systemPrompt` | chemin vers le `SYSTEM.md` du système (défaut : `<configWorkspace>/SYSTEM.md`). Synchronisé vers `~/.pi/agent/SYSTEM.md` au boot, pour remplacer le system prompt par défaut « coding agent » de pi |
 | `tools.camofox` | URL REST du navigateur stealth + accessKey optionnelle |
 | `tools.webSearch` | provider de recherche (`camofox-macro` avec `@google_search` par défaut) |
 
@@ -55,7 +54,7 @@ Source de vérité unique. Le bouton **Config** de la topbar ouvre ce dossier co
 
 Par défaut pi se comporte en agent de codage. Pour en faire un assistant général (recherche web, vérification de faits, rédaction…), un `SYSTEM.md` vit dans le dossier config (`~/.vulcain/config/SYSTEM.md`, créé par le bootstrap s'il n'existe pas). Son contenu **remplace** le system prompt par défaut de pi (les outils, skills et contextes restent ajoutés par pi après).
 
-Le chemin de ce fichier est configurable via `agent.systemPrompt` dans `config.json`. Le serveur le synchronise vers `~/.pi/agent/SYSTEM.md` (emplacement global lu par pi) au démarrage et à chaque connexion chat. Supprimer le fichier (ou retirer `agent.systemPrompt`) rétablit le comportement par défaut de pi.
+Le chemin de ce fichier est configurable via `agent.systemPrompt` dans `config.json`. Le serveur le synchronise vers `~/.pi/agent/SYSTEM.md` (emplacement global lu par pi) au démarrage. Supprimer le fichier (ou retirer `agent.systemPrompt`) rétablit le comportement par défaut de pi.
 
 ## Skills
 
@@ -89,20 +88,22 @@ Sans clé/baseUrl configuré, ou si le provider est injoignable, l'extension ret
 ```
 web/    React + Vite : react-arborist · CodeMirror 6 · react-resizable-panels
         markdown-it+DOMPurify+highlight.js · Typst.ts WASM (compil + rendu + $typst.pdf local)
-server/ Fastify : fs API jailée par workspace · chokidar→WS · pont WS⇄stdio `pi-acp`
-        (transport pur JSON-RPC délimité \n — remplacer d'agent ne demande zéro code)
+        assistant-ui + Vercel AI SDK (chat) · ACP abandonné au profit du SDK pi in-process
+server/ Fastify : fs API jailée par workspace · chokidar→WS · chat = pi in-process
+        (createAgentSession → flux « UI message stream » sur POST /api/chat)
 pi-ext/ extension TypeScript pour pi (jiti, pas de compilation)
-test/   faux agent ACP + e2e du pont et du watcher (node test/e2e.mjs, serveur requis)
+test/   e2e du chat + watcher (node test/e2e.mjs, serveur requis) · test/ui (Playwright)
 ```
 
-Le navigateur ne peut pas spawner de processus : le pont WS⇄stdio est donc inévitable ; il est volontairement stupide (il ne comprend pas le protocole, il ne casse jamais). Toute l'intelligence du protocole vit côté front (`web/src/acp.ts`, sous-set typé d'ACP).
+Le navigateur ne peut pas spawner de processus ; le chat passe donc par le serveur, qui embarque pi **in-process** via `@earendil-works/pi-coding-agent`. `POST /api/chat` reçoit les messages, fait tourner un `AgentSession` (une session par workspace) et streame les événements pi au format « UI message stream » du SDK Vercel AI, consommé côté front par assistant-ui (`useChatRuntime`).
 
 ## Tests
 
 ```bash
 VULCAIN_HOME=/tmp/vulcain-test node scripts/bootstrap.mjs
-# pointer cfg.agent.command vers ["node", "<repo>/test/fake-agent.mjs"]
-VULCAIN_HOME=/tmp/vulcain-test PI_CODING_AGENT_DIR=/tmp/vulcain-test-pi VULCAIN_PORT=7391 node server/dist/index.js &
-PI_CODING_AGENT_DIR=/tmp/vulcain-test-pi node test/e2e.mjs   # 9 checks : watch + initialize/session/prompt/streaming/tool_call + sync SYSTEM.md
+VULCAIN_HOME=/tmp/vulcain-test VULCAIN_CHAT_BACKEND=fake PI_CODING_AGENT_DIR=/tmp/vulcain-test-pi VULCAIN_PORT=7391 node server/dist/index.js &
+PI_CODING_AGENT_DIR=/tmp/vulcain-test-pi node test/e2e.mjs   # 18 checks : watch + /api/chat streaming/tool_call/commands/reset + sync SYSTEM.md
 node test/web-search.mjs   # 19 checks : parsing SearXNG/Tavily, recherche parallèle + deep, cache, fallback camofox
 ```
+
+`VULCAIN_CHAT_BACKEND=fake` branche un backend de chat scripté (echo + tool call) pour les tests ; sans cette variable, le serveur utilise le vrai pi in-process.

@@ -58,7 +58,7 @@ if (!fs.existsSync(configPath)) {
         ]
       }
     },
-    agent: { command: [process.env.VULCAIN_AGENT_CMD || 'pi-acp'], args: [], systemPrompt: systemPromptPath.replace(os.homedir(), '~') },
+    agent: { systemPrompt: systemPromptPath.replace(os.homedir(), '~') },
     tools: {
       camofox: { baseUrl: process.env.VULCAIN_CAMOFOX_URL || 'http://camofox:9377', accessKey: '' },
       webSearch: {
@@ -134,7 +134,7 @@ if (process.argv.includes('--install-pi')) {
     console.log('[bootstrap] pi already installed')
   } catch {
     console.log('[bootstrap] installing @earendil-works/pi-coding-agent globally...')
-    execSync('npm install -g --ignore-scripts @earendil-works/pi-coding-agent pi-acp', { stdio: 'inherit' })
+    execSync('npm install -g --ignore-scripts @earendil-works/pi-coding-agent', { stdio: 'inherit' })
   }
 }
 

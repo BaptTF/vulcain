@@ -7,22 +7,22 @@ Guidance for AI agents and contributors working on the Vulcain codebase.
 Vulcain is a minimal web note-taking editor:
 
 - **Markdown notes** (Obsidian-style) with a **PDF export** via Typst (WASM in the browser).
-- An **AI agent** wired in through the ACP protocol ([`pi`](https://github.com/earendil-works/pi) via the `pi-acp` adapter).
+- An **AI agent** wired in through pi's in-process SDK (`@earendil-works/pi-coding-agent`, `createAgentSession`) with a Vercel-AI-SDK streamed chat surfaced by assistant-ui.
 - **Web search** via an agentic search layer in the pi extension (SearXNG metasearch self-hosted, optional Tavily) + **stealth browsing** via [camofox](https://github.com/jo-inc/camofox-browser) for protected sites.
 
 ```
-File tree │ CodeMirror 6 editor (+ md/typst preview, PDF export) │ Agent chat (ACP)
+File tree │ CodeMirror 6 editor (+ md/typst preview, PDF export) │ Agent chat (assistant-ui)
 ```
 
 ## Repository layout
 
 | Path | Role |
 |---|---|
-| `web/` | React + Vite frontend: react-arborist, CodeMirror 6, react-resizable-panels, markdown-it + DOMPurify + highlight.js, Typst.ts WASM. All ACP protocol intelligence lives here (`web/src/acp.ts`). |
-| `server/` | Fastify backend: workspace-jailed fs API, chokidar → WS, WS⇄stdio bridge to `pi-acp` (pure `\n`-delimited JSON-RPC transport). The bridge is intentionally dumb and never parses the protocol. |
+| `web/` | React + Vite frontend: react-arborist, CodeMirror 6, react-resizable-panels, markdown-it + DOMPurify + highlight.js, Typst.ts WASM. Chat = assistant-ui primitives (`web/src/components/assistant-ui/`) + `useChatRuntime` (Vercel AI SDK) sur `POST /api/chat`. |
+| `server/` | Fastify backend: workspace-jailed fs API, chokidar → WS, chat = pi **in-process** (`server/src/chat.ts` : `createAgentSession` par workspace, événements pi traduits en flux « UI message stream »). |
 | `pi-ext/` | TypeScript extension for pi (jiti, no compilation) exposing extra tools (`web_search`, `web_research`, `web_read`, `browser_*`, `browser_screenshot`). Copied as a directory to `~/.pi/agent/extensions/vulcain-tools/`. |
 | `scripts/` | Bootstrap and build helpers. |
-| `test/` | Fake ACP agent + e2e tests for the bridge and watcher (`node test/e2e.mjs`, requires a running server). Search-provider tests run standalone (`node test/web-search.mjs`). `test/ui` for UI tests. |
+| `test/` | E2e tests for the chat API and watcher (`node test/e2e.mjs`, requires a running server). Search-provider tests run standalone (`node test/web-search.mjs`). `test/ui` for UI tests. |
 | `docker/` | Dockerfile + compose. |
 | `.github/workflows/` | CI/CD (Docker build/push to ghcr.io). |
 
@@ -38,21 +38,23 @@ npm run lint             # eslint .
 
 ### Tests
 
-The e2e test suite requires a running server:
+The e2e test suite requires a running server (start it with the fake chat backend):
 
 ```bash
 VULCAIN_HOME=/tmp/vulcain-test node scripts/bootstrap.mjs
-# point cfg.agent.command toward ["node", "<repo>/test/fake-agent.mjs"]
-VULCAIN_HOME=/tmp/vulcain-test PI_CODING_AGENT_DIR=/tmp/vulcain-test-pi VULCAIN_PORT=7391 node server/dist/index.js &
-PI_CODING_AGENT_DIR=/tmp/vulcain-test-pi node test/e2e.mjs   # 9 checks: watch + initialize/session/prompt/streaming/tool_call + SYSTEM.md sync
+VULCAIN_HOME=/tmp/vulcain-test VULCAIN_CHAT_BACKEND=fake PI_CODING_AGENT_DIR=/tmp/vulcain-test-pi VULCAIN_PORT=7391 node server/dist/index.js &
+PI_CODING_AGENT_DIR=/tmp/vulcain-test-pi node test/e2e.mjs   # 18 checks: watch + /api/chat streaming/tool_call/commands/reset + SYSTEM.md sync
 node test/web-search.mjs                                      # 19 checks: SearXNG/Tavily parsing, parallel+deep research, cache, camofox fallback
 ```
+
+`VULCAIN_CHAT_BACKEND=fake` selects a scripted in-process chat backend (echo + tool call) so tests run without a real pi/LLM. Without it, the server uses the real pi SDK in-process.
 
 ### UI tests (`test/ui/ui.spec.mjs`)
 
 The UI suite drives a real Chromium via Playwright and needs the app served
-plus the fake agent (`test/fake-agent.mjs`). It covers the editor (open, content,
-**autosave on typing**, **open-tab restoration across reload**), file tree and chat.
+plus the fake chat backend (`VULCAIN_CHAT_BACKEND=fake`). It covers the editor (open, content,
+**autosave on typing**, **open-tab restoration across reload**), file tree, chat and
+workspace switcher.
 
 - **Native (fast path, when Chromium deps are available):** the runner bootstraps an
   isolated env, starts the server (serves `web/dist` + API on one port) and runs the spec:
@@ -91,7 +93,7 @@ These rules apply to every contribution. Violations are treated as review blocke
 
 ## Conventions
 
-- **No new processes from the browser**: the browser cannot spawn processes, so the WS⇄stdio bridge is unavoidable — keep it intentionally stupid (it never parses the ACP protocol; all protocol logic lives in `web/src/acp.ts`).
-- **Config is the single source of truth**: `~/.vulcain/config.json`. Server only touches configured workspace roots plus the config workspace. `agent.systemPrompt` (path to a `SYSTEM.md`, default `<configWorkspace>/SYSTEM.md`) is synced to `~/.pi/agent/SYSTEM.md` at boot and on each ACP connect so pi replaces its default coding-agent prompt for the chat.
-- **Environment**: `VULCAIN_HOME`, `VULCAIN_PORT`, `PI_CODING_AGENT_DIR` and `VULCAIN_WORKSPACES` override the home dir, port, pi agent dir and workspace root for isolated test runs.
-- **TypeScript** across the repo; frontend ships typed ACP subset in `web/src/acp.ts`.
+- **No processes from the browser**: the browser cannot spawn processes, so the chat runs through the server. pi is embedded **in-process** (`createAgentSession`); `POST /api/chat` streams pi events as the Vercel AI SDK "UI message stream" (SSE), consumed by assistant-ui's `useChatRuntime`. The server keeps one `AgentSession` per workspace (`server/src/chat.ts`).
+- **Config is the single source of truth**: `~/.vulcain/config.json`. Server only touches configured workspace roots plus the config workspace. `agent.systemPrompt` (path to a `SYSTEM.md`, default `<configWorkspace>/SYSTEM.md`) is synced to `~/.pi/agent/SYSTEM.md` at boot so pi replaces its default coding-agent prompt for the chat.
+- **Environment**: `VULCAIN_HOME`, `VULCAIN_PORT`, `PI_CODING_AGENT_DIR` and `VULCAIN_WORKSPACES` override the home dir, port, pi agent dir and workspace root for isolated test runs. `VULCAIN_CHAT_BACKEND=fake` swaps in a scripted chat backend (echo + tool call) for tests.
+- **TypeScript** across the repo; the chat wire types live in `server/src/chat.ts`.

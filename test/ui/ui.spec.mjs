@@ -384,18 +384,18 @@ if (typFound) {
 await page.locator('[role="treeitem"]', { hasText: 'welcome.md' }).first().click()
 await page.waitForTimeout(300)
 
+// --- chat: assistant-ui connected to the fake agent via /api/chat ---
 let chatStatus = ''
 for (let i = 0; i < 20; i++) {
   await page.waitForTimeout(1000)
   chatStatus = (await page.locator('.chat-status').textContent())?.trim() ?? ''
-  if (chatStatus !== 'connexion…') break
+  if (chatStatus !== '') break
 }
 console.log(`  chat status: ${chatStatus}`)
-check('agent websocket connected (chat pret)', chatStatus === 'prêt')
-check('real agent greeted via ACP bridge', (await page.locator('.chat-messages').textContent())?.includes('fake-agent') === true)
+check('chat ready (agent connected)', chatStatus === 'prêt')
 
-// hide/show the agent panel must not reconnect the agent (the panel is only
-// collapsed, so <Chat> stays mounted and the ACP socket stays open)
+// hide/show the agent panel must not reconnect the chat (the panel is only
+// collapsed, so <Chat> stays mounted)
 const statusBefore = (await page.locator('.chat-status').textContent())?.trim() ?? ''
 await paneToggle('Agent').click()
 await page.waitForTimeout(300)
@@ -407,80 +407,24 @@ check(
   statusBefore === 'prêt' && statusAfter === 'prêt'
 )
 
-// Le bouton Envoyer doit au minimum afficher le message de l'utilisateur
-// (le bug historique etait un clic sans aucun effet quand la connexion pendait)
-const userBubbleBefore = await page.locator('.msg.user').count()
-await page.locator('.chat-input').fill('ping')
-await page.locator('.chat-input').press('Enter')
-let sent = false
-for (let i = 0; i < 10; i++) {
+// sending a message streams the echo back and renders a tool card
+await page.locator('.aui-composer-input').fill('ping')
+await page.locator('.aui-composer-input').press('Enter')
+let echoReceived = false
+let toolCardSeen = false
+for (let i = 0; i < 20; i++) {
   await page.waitForTimeout(500)
-  const bubbles = await page.locator('.msg.user').count()
-  const last = (await page.locator('.chat-messages').textContent()) ?? ''
-  if (bubbles > userBubbleBefore && last.includes('ping')) {
-    sent = true
-    break
-  }
+  const text = (await page.locator('.aui-markdown').textContent()) ?? ''
+  if (text.includes('echo: ping')) echoReceived = true
+  if (await page.locator('.tool-card').count()) toolCardSeen = true
+  if (echoReceived && toolCardSeen) break
 }
-check('bouton Envoyer fonctionne (message utilisateur affiché)', sent)
+check('message sent streams the echo back', echoReceived)
+check('tool call rendered as a card', toolCardSeen)
 
-const wsFailures = consoleErrors.filter(e => e.includes('/api/acp') || e.includes('/api/watch'))
+const wsFailures = consoleErrors.filter(e => e.includes('/api/watch'))
 check('no websocket connection errors', wsFailures.length === 0)
 if (wsFailures.length) console.log('  ->', wsFailures[0].slice(0, 160))
-
-// --- agent auto-reconnect + message queue ---
-// the fake agent exits on the magic prompt '__exit__', so the bridge closes the
-// websocket (4000 'agent exited') and the chat must reconnect on its own.
-await page.locator('.chat-input').fill('__exit__')
-await page.locator('.chat-input').press('Enter')
-let dropped = false
-for (let i = 0; i < 40; i++) {
-  await page.waitForTimeout(100)
-  const st = (await page.locator('.chat-status').textContent())?.trim() ?? ''
-  if (st !== 'prêt') {
-    dropped = true
-    break
-  }
-}
-check('agent disconnect detected after __exit__', dropped)
-
-// while offline, a message must be queued (not silently dropped)
-await page.locator('.chat-input').fill('message hors-ligne')
-await page.locator('.chat-input').press('Enter')
-let queued = false
-for (let i = 0; i < 10; i++) {
-  await page.waitForTimeout(100)
-  const all = (await page.locator('.chat-messages').textContent()) ?? ''
-  if (all.includes('en attente')) {
-    queued = true
-    break
-  }
-}
-check('message sent offline is queued (en attente)', queued)
-
-// the chat must reconnect by itself and get back to 'prêt'
-let backToReady = false
-for (let i = 0; i < 40; i++) {
-  await page.waitForTimeout(250)
-  const st = (await page.locator('.chat-status').textContent())?.trim() ?? ''
-  if (st === 'prêt') {
-    backToReady = true
-    break
-  }
-}
-check('agent auto-reconnects after a drop', backToReady)
-
-// the queued message is flushed once reconnected and the agent echoes it
-let flushed = false
-for (let i = 0; i < 20; i++) {
-  await page.waitForTimeout(250)
-  const last = (await page.locator('.chat-messages').textContent()) ?? ''
-  if (last.includes('echo: message hors-ligne')) {
-    flushed = true
-    break
-  }
-}
-check('queued message flushed after reconnect (echo received)', flushed)
 
 // --- workspace selector: fast switcher + open-folder explorer ---
 const wsTrigger = page.locator('.topbar .btn', { hasText: '▾' }).first()

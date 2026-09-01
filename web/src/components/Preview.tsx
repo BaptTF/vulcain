@@ -1,29 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import MarkdownIt from 'markdown-it'
-import DOMPurify from 'dompurify'
-import hljs from 'highlight.js/lib/common'
+import { renderMarkdown } from '../markdown'
 import { typstSvg } from '../typst'
 
-function escapeHtml(s: string): string {
-  return s.replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]!)
-}
-
-const md: MarkdownIt = new MarkdownIt({
-  html: false,
-  linkify: true,
-  breaks: true,
-  highlight(code: string, lang: string): string {
-    if (lang && hljs.getLanguage(lang)) {
-      try {
-        return `<code class="hljs">${hljs.highlight(code, { language: lang }).value}</code>`
-      } catch {}
-    }
-    return `<code class="hljs">${escapeHtml(code)}</code>`
-  }
-})
-
 export function MarkdownView({ source }: { source: string }) {
-  const html = useMemo(() => DOMPurify.sanitize(md.render(source)), [source])
+  const html = useMemo(() => renderMarkdown(source), [source])
   return <div className="md-body" dangerouslySetInnerHTML={{ __html: html }} />
 }
 
