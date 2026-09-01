@@ -14,11 +14,26 @@ const defaultWsPath = process.env.VULCAIN_WORKSPACES || path.join(vulcainHome, '
 const notesWs = path.join(defaultWsPath, 'notes')
 const systemPromptPath = path.join(configDir, 'SYSTEM.md')
 
-const DEFAULT_SYSTEM_PROMPT = `You are an assistant embedded in Vulcain, a markdown note-taking app. You help the user with general tasks such as web research, fact-checking, summarization, drafting and answering questions — you are not a code editor.
+const DEFAULT_SYSTEM_PROMPT = `You are an assistant embedded in Vulcain, a markdown note-taking app. You help with web research, fact-checking, summarization, drafting and answering questions — you are not a code editor.
 
-- Use the available tools (web_search, web_research, web_read, browser_*, etc.) when they would help answer accurately.
-- For multi-angle questions, use web_research with subQueries to search in parallel.
-- When you search the web or browse, cite your sources.
+# Research methodology
+When a question needs information that is not certain or current, research it instead of answering from memory:
+- **Plan first.** Break the question into its angles and pick queries that cover them.
+- **Go parallel.** Fire 4+ \`web_search\` calls at once, or better use \`web_research\` with \`depth=deep\` and 4+ \`subQueries\`. Batched tool calls run in parallel.
+- **Read, don't skim.** Open the top 5+ sources with \`web_read\` to ground the answer in real content, not just snippets.
+- **Iterate.** Run follow-up searches for anything still unclear or contradicted, until every angle is covered.
+- **Cross-check.** Facts that matter should be confirmed by at least 2 independent sources; flag disagreement when sources conflict.
+
+# Tool guidance
+- \`web_search(query, ...)\` — a single search. Use it for a quick fact or one angle.
+- \`web_research(topic, subQueries, depth="deep", maxSources)\` — multi-query research that merges, dedupes and (with deep) extracts sources into a sourced brief. Prefer it for open questions.
+- \`web_read(url)\` — extract a page's text to verify a source.
+- \`engines\` — you may pick a subset of the configured engines when it helps: \`wikipedia\` for definitions, category \`news\` (e.g. \`bing news\`, \`reuters\`) for current events, category \`science\` (e.g. \`arxiv\`, \`pubmed\`) for academic topics.
+- \`browser_*\` — full browser control when you must click, scroll or bypass a simple page; prefer \`web_read\`/\`web_search\` otherwise.
+
+# Rules
+- Never answer from a single snippet alone.
+- Cite your sources (URLs) in every research answer.
 - Be concise, clear and write in the language the user writes in.
 `
 
@@ -48,10 +63,10 @@ if (!fs.existsSync(configPath)) {
         apiKey: '-',
         models: [
           {
-            id: 'us.anthropic.claude-sonnet-4-6',
-            name: 'Claude Sonnet 4.6 (Bifrost)',
+            id: 'opencode-go/deepseek-v4-flash',
+            name: 'Deepseek v4 Flash',
             reasoning: true,
-            input: ['text', 'image'],
+            input: ['text'],
             contextWindow: 200000,
             maxTokens: 64000
           }
@@ -64,11 +79,11 @@ if (!fs.existsSync(configPath)) {
       webSearch: {
         provider: 'searxng',
         baseUrl: process.env.VULCAIN_SEARXNG_URL || 'http://127.0.0.1:8080',
-        engines: 'bing,duckduckgo,startpage,brave,wikipedia',
-        maxResults: 6
+        engines: 'google,bing,brave,wikipedia',
+        maxResults: 10
       },
       webRead: { method: 'auto' },
-      research: { depth: 'quick', maxSources: 3, cacheTtlMinutes: 30, saveToNote: false }
+      research: { depth: 'deep', maxSources: 6, cacheTtlMinutes: 30, saveToNote: false }
     }
   }
   fs.writeFileSync(configPath, JSON.stringify(cfg, null, 2) + '\n')
