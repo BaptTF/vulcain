@@ -67,9 +67,9 @@ Format standard [agentskills.io](https://agentskills.io), chargés nativement pa
 
 Installée dans `~/.pi/agent/extensions/vulcain-tools/` (dossier, jiti), lit la config Vulcain au runtime :
 
-- `web_search(query, category?, timeRange?, maxResults?)` — recherche web via le provider configuré (`tools.webSearch`).
-- `web_research(topic, subQueries?, depth?, maxSources?, category?, timeRange?, saveToNote?)` — recherche **agentique** : sous-requêtes en parallèle, fusion/dédoublonnage, brief markdown sourcé `[n]` ; `depth=deep` lit les top-sources ; `saveToNote` écrit `.research/<topic>.md`.
-- `web_read(url)` — extraction rapide du contenu d'une page (Tavily extract si clé, sinon camofox).
+- `web_search(query, category?, timeRange?, engines?, maxResults?)` — recherche web via le provider configuré (`tools.webSearch`). `timeRange` (day/week/month/year) est transmis à SearXNG et Tavily ; `engines` restreint à un sous-ensemble de l'allowlist config.
+- `web_research(topic, subQueries?, depth?, maxSources?, category?, timeRange?, engines?, saveToNote?)` — recherche **agentique** : sous-requêtes en parallèle, fusion/dédoublonnage, brief markdown sourcé `[n]` ; `depth=deep` lit les top-sources ; `saveToNote` écrit `.research/<topic>.md`.
+- `web_read(url)` — extraction rapide du contenu d'une page (Tavily extract si clé, sinon camofox). Retente une fois si le tab camofox a été tué (410).
 - `browser_open/navigate/click/type/scroll/snapshot/close` — pilotage du navigateur stealth avec refs stables (e1, e2…) pour les pages protégées.
 - `browser_screenshot(tabId)` — PNG sauvé dans `<workspace>/.shots/`, chemin retourné au modèle.
 
@@ -81,7 +81,7 @@ Installée dans `~/.pi/agent/extensions/vulcain-tools/` (dossier, jiti), lit la 
 | `tavily` | `apiKey` (free tier 1 000 req/mois) | search+extract en 1 appel, `topic`/`time_range` |
 | `camofox-macro` | camofox | Google via navigateur stealth (fallback par défaut) |
 
-Sans clé/baseUrl configuré, ou si le provider est injoignable, l'extension retombe sur `camofox-macro`. Autres réglages : `engines`, `categories`, `maxResults`, `tools.webRead.method`, `tools.research.{depth,maxSources,cacheTtlMinutes,saveToNote}`. Overrides env : `TAVILY_API_KEY`, `VULCAIN_SEARXNG_URL`.
+Sans clé/baseUrl configuré, ou si le provider est injoignable, l'extension retombe sur `camofox-macro`. Autres réglages : `engines` (allowlist, ex. `google,bing,brave,wikipedia` — les engines bloqués par CAPTCHA type `duckduckgo`/`startpage` peuvent être retirés), `categories`, `maxResults` (défaut 10), `tools.webRead.method`, `tools.research.{depth (défaut deep),maxSources (défaut 6),cacheTtlMinutes,saveToNote}`. Overrides env : `TAVILY_API_KEY`, `VULCAIN_SEARXNG_URL`.
 
 ## Architecture
 
