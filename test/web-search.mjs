@@ -76,6 +76,48 @@ async function main() {
   const r2 = await runSearch({ ...searxngCfg }, { query: 'cached' }, { fetch: fakeSearch, cache })
   check('cache: second call served from cache', hits.length === 1 && r1.results.length === r2.results.length)
 
+  // --- defaults when config omits them ---
+  const noMaxCfg = { webSearch: { provider: 'searxng', baseUrl: 'http://searxng.test', engines: 'bing' } }
+  const fakeMany = async url => {
+    const u = new URL(url)
+    const q = u.searchParams.get('q')
+    return jsonResponse({
+      query: q,
+      results: Array.from({ length: 12 }, (_, i) => ({ title: `${q} ${i}`, url: `http://r${i}.example`, content: q, score: 1 - i / 20 })),
+      answers: []
+    })
+  }
+  const d = await runSearch(noMaxCfg, { query: 'defaults' }, { fetch: fakeMany, cache: new TtlCache(60_000), rate: new RateLimiter(0) })
+  check('defaults: maxResults is 10 when unset', d.results.length === 10)
+
+  // --- time_range passthrough ---
+  hits = []
+  await runSearch({ ...searxngCfg }, { query: 'actu', timeRange: 'week' }, { fetch: fakeSearch, cache: new TtlCache(60_000), rate: new RateLimiter(0) })
+  check('searxng: sends time_range', /[?&]time_range=week/.test(hits[hits.length - 1]))
+
+  // --- engines: subset, intersection and cache key ---
+  hits = []
+  const engCache = new TtlCache(60_000)
+  await runSearch({ ...searxngCfg }, { query: 'eng', engines: ['duckduckgo'] }, { fetch: fakeSearch, cache: engCache, rate: new RateLimiter(0) })
+  check('engines: subset is sent', /engines=duckduckgo$/.test(hits[hits.length - 1]))
+  await runSearch({ ...searxngCfg }, { query: 'eng', engines: ['wikipedia'] }, { fetch: fakeSearch, cache: engCache, rate: new RateLimiter(0) })
+  check('engines: unknown engine falls back to allowlist', /engines=bing%2Cduckduckgo/.test(hits[hits.length - 1]))
+  const e3 = await runSearch({ ...searxngCfg }, { query: 'eng', engines: ['wikipedia'] }, { fetch: fakeSearch, cache: engCache, rate: new RateLimiter(0) })
+  check('cache: engine variation creates distinct cache keys', hits.length === 2 && e3.results.length > 0)
+
+  // --- engines: empty results with explicit subset -> retry with default engines ---
+  hits = []
+  const fakeEmptySubset = async url => {
+    const u = new URL(url)
+    hits.push(u.toString())
+    const q = u.searchParams.get('q')
+    const engines = u.searchParams.get('engines')
+    if (engines === 'duckduckgo') return jsonResponse({ query: q, results: [], answers: [] })
+    return jsonResponse({ query: q, results: [{ title: q, url: 'http://ok.example', content: q, score: 1, engine: 'bing' }], answers: [] })
+  }
+  const er = await runSearch({ ...searxngCfg }, { query: 'retry', engines: ['duckduckgo'] }, { fetch: fakeEmptySubset, cache: new TtlCache(60_000), rate: new RateLimiter(0) })
+  check('engines: empty subset retried with default engines', hits.length === 2 && er.results.length === 1 && /engines=duckduckgo/.test(hits[0]))
+
   globalThis.fetch = async (url, init) => {
     const u = new URL(url)
     if (u.hostname === 'searxng.test') throw new Error('searxng unreachable')
@@ -89,6 +131,33 @@ async function main() {
   }
   const fb = await runSearch({ ...searxngCfg }, { query: 'down' }, { fetch: async () => { throw new Error('searxng unreachable') } })
   check('fallback: searxng down -> camofox snapshot', fb.results.length === 0 && fb.answer === 'CAMOFOX_SNAPSHOT')
+
+  // --- camofox: retry once on 410 "tab no longer exists" ---
+  let camofoxTabs = 0
+  const camofox410 = (snapshotStatus) => async (url, init) => {
+    const u = new URL(url)
+    if (u.hostname !== 'camofox.test') throw new Error(`unexpected ${url}`)
+    if (u.pathname === '/tabs' && init?.method === 'POST') {
+      camofoxTabs += 1
+      return jsonResponse({ tabId: `t${camofoxTabs}` })
+    }
+    if (/\/navigate/.test(u.pathname)) return jsonResponse({})
+    if (/\/snapshot/.test(u.pathname)) {
+      if (snapshotStatus(camofoxTabs)) {
+        return { ok: false, status: 410, headers: { get: () => 'text/plain' }, async text() { return '{"error":"Tab no longer exists (browser was restarted)."}' }, async json() { return {} } }
+      }
+      return jsonResponse({ snapshot: `OK_${camofoxTabs}` })
+    }
+    if (init?.method === 'DELETE') return jsonResponse({})
+    throw new Error(`unexpected ${url}`)
+  }
+  globalThis.fetch = camofox410(tab => tab === 1)
+  const r410 = await runSearch({ webSearch: { provider: 'camofox-macro', macro: '@google_search' } }, { query: 'x' }, { rate: new RateLimiter(0) })
+  check('camofox: search retries once on 410 tab-gone', camofoxTabs === 2 && r410.answer === 'OK_2')
+
+  globalThis.fetch = camofox410(tab => tab === 3)
+  const read410 = await readUrl({ webRead: { method: 'camofox' }, webSearch: {} }, 'http://page.example')
+  check('readUrl: camofox retries once on 410 tab-gone', camofoxTabs === 4 && read410 === 'OK_4')
 
   const fakeMulti = async url => {
     const u = new URL(url)
