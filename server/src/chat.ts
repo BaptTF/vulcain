@@ -1,6 +1,7 @@
-import { createAgentSession, ModelRuntime } from '@earendil-works/pi-coding-agent'
+import { createAgentSession, ModelRuntime, SessionManager } from '@earendil-works/pi-coding-agent'
 import type { AgentSession, AgentSessionEvent } from '@earendil-works/pi-coding-agent'
 import { createUIMessageStream, pipeUIMessageStreamToResponse } from 'ai'
+import fs from 'node:fs'
 import path from 'node:path'
 import type { FastifyInstance, FastifyRequest } from 'fastify'
 import { findWorkspace, loadConfig, type ResolvedWorkspace } from './config.js'
@@ -26,6 +27,26 @@ export type ChatSessionEvent =
   | { type: 'done' }
   | { type: 'error'; message: string }
 
+export interface ChatUsage {
+  inputTokens: number
+  outputTokens: number
+  cachedInputTokens?: number
+  totalTokens: number
+}
+
+export interface ChatContextUsage {
+  tokens: number | null
+  contextWindow: number
+  percent: number | null
+}
+
+export interface ChatSessionInfo {
+  id: string
+  title?: string
+  modified: string
+  messageCount: number
+}
+
 export interface ChatSession {
   readonly sessionId: string
   readonly isStreaming: boolean
@@ -33,11 +54,13 @@ export interface ChatSession {
   abort(): Promise<void>
   subscribe(listener: (event: ChatSessionEvent) => void): () => void
   commands(): Promise<{ name: string; description?: string }[]>
+  getUsage(): { usage: ChatUsage; contextUsage: ChatContextUsage }
   dispose(): void
 }
 
 export interface ChatBackend {
-  createSession(cwd: string): Promise<ChatSession>
+  createSession(cwd: string, threadId?: string, wsName?: string): Promise<ChatSession>
+  listSessions?(wsName: string, cwd: string): Promise<ChatSessionInfo[]>
 }
 
 const KIND_BY_TOOL: Record<string, string> = {
@@ -178,6 +201,22 @@ class PiChatSession implements ChatSession {
     return out
   }
 
+  getUsage(): { usage: ChatUsage; contextUsage: ChatContextUsage } {
+    const stats = this.session.getSessionStats()
+    const context = this.session.getContextUsage()
+    return {
+      usage: {
+        inputTokens: stats.tokens.input,
+        outputTokens: stats.tokens.output,
+        cachedInputTokens: stats.tokens.cacheRead,
+        totalTokens: stats.tokens.total
+      },
+      contextUsage: context
+        ? { tokens: context.tokens, contextWindow: context.contextWindow, percent: context.percent }
+        : { tokens: null, contextWindow: 0, percent: null }
+    }
+  }
+
   dispose(): void {
     this.session.dispose()
   }
@@ -202,16 +241,64 @@ export class PiChatBackend implements ChatBackend {
     return this.modelRuntimePromise
   }
 
-  async createSession(cwd: string): Promise<ChatSession> {
+  async createSession(cwd: string, threadId?: string, wsName?: string): Promise<ChatSession> {
     const modelRuntime = await this.getModelRuntime()
-    const { session } = await createAgentSession({ cwd, modelRuntime })
+    let sessionManager: SessionManager | undefined
+    if (threadId && wsName) {
+      const dir = path.join(
+        piAgentDir(),
+        'sessions',
+        'vulcain',
+        encodeURIComponent(wsName),
+        encodeURIComponent(threadId)
+      )
+      const infos = await SessionManager.list(cwd, dir)
+      if (infos.length > 0) {
+        sessionManager = SessionManager.open(infos[0].path, dir, cwd)
+      } else {
+        sessionManager = SessionManager.create(cwd, dir)
+      }
+    }
+    const { session } = await createAgentSession({
+      cwd,
+      modelRuntime,
+      ...(sessionManager ? { sessionManager } : {})
+    })
     return new PiChatSession(session)
+  }
+
+  async listSessions(wsName: string, cwd: string): Promise<ChatSessionInfo[]> {
+    const base = path.join(piAgentDir(), 'sessions', 'vulcain', encodeURIComponent(wsName))
+    const out: ChatSessionInfo[] = []
+    if (!fs.existsSync(base)) return out
+    const dirs = fs.readdirSync(base, { withFileTypes: true })
+      .filter(d => d.isDirectory())
+      .map(d => d.name)
+    for (const dirName of dirs) {
+      const dir = path.join(base, dirName)
+      try {
+        const infos = await SessionManager.list(cwd, dir)
+        if (infos.length === 0) continue
+        const info = infos[0]
+        out.push({
+          id: decodeURIComponent(dirName),
+          title: info.name ?? (info.firstMessage || undefined),
+          modified: info.modified.toISOString(),
+          messageCount: info.messageCount
+        })
+      } catch {
+        // ignore unreadable session dirs
+      }
+    }
+    out.sort((a, b) => b.modified.localeCompare(a.modified))
+    return out
   }
 }
 
 interface FakeState {
   created: number
   promptCount: number
+  title?: string
 }
 
 class FakeChatSession implements ChatSession {
@@ -234,6 +321,9 @@ class FakeChatSession implements ChatSession {
 
   async prompt(text: string): Promise<void> {
     this.state.promptCount += 1
+    if (!this.state.title) {
+      this.state.title = `echo: ${text.slice(0, 40)}`
+    }
     const prefix = `echo: ${text}`
     const chunks = [prefix.slice(0, 6), prefix.slice(6)]
     for (const delta of chunks) {
@@ -265,6 +355,13 @@ class FakeChatSession implements ChatSession {
     ]
   }
 
+  getUsage(): { usage: ChatUsage; contextUsage: ChatContextUsage } {
+    return {
+      usage: { inputTokens: 42, outputTokens: 7, cachedInputTokens: 10, totalTokens: 49 },
+      contextUsage: { tokens: 12000, contextWindow: 200000, percent: 6 }
+    }
+  }
+
   dispose(): void {
     this.disposed = true
   }
@@ -272,21 +369,45 @@ class FakeChatSession implements ChatSession {
 
 class FakeChatBackend implements ChatBackend {
   private readonly sessions = new Map<string, FakeChatSession>()
+  private readonly threads = new Map<string, FakeState>()
 
-  async createSession(cwd: string): Promise<ChatSession> {
-    const existing = this.sessions.get(cwd)
+  private threadKey(cwd: string, threadId?: string): string {
+    return threadId ? `${cwd}::${threadId}` : cwd
+  }
+
+  async createSession(cwd: string, threadId?: string): Promise<ChatSession> {
+    let state: FakeState
+    if (threadId) {
+      state = this.threads.get(threadId) ?? { created: this.threads.size + 1, promptCount: 0 }
+      this.threads.set(threadId, state)
+    } else {
+      state = { created: this.sessions.size + 1, promptCount: 0 }
+    }
+    const key = this.threadKey(cwd, threadId)
+    const existing = this.sessions.get(key)
     if (existing) {
       existing.dispose()
-      this.sessions.delete(cwd)
+      this.sessions.delete(key)
     }
-    const session = new FakeChatSession(cwd, { created: this.sessions.size + 1, promptCount: 0 })
-    this.sessions.set(cwd, session)
+    const session = new FakeChatSession(cwd, state)
+    this.sessions.set(key, session)
     return session
+  }
+
+  async listSessions(_wsName: string): Promise<ChatSessionInfo[]> {
+    const now = new Date().toISOString()
+    return [...this.threads.entries()].map(([id, state]) => ({
+      id,
+      title: state.title || undefined,
+      modified: now,
+      messageCount: state.promptCount
+    }))
   }
 }
 
 interface ChatRequestBody {
   workspace?: string
+  sessionId?: string
   reset?: boolean
   messages?: {
     role?: string
@@ -321,23 +442,42 @@ function lastUserText(body: ChatRequestBody): string | undefined {
   return undefined
 }
 
+const SESSION_TTL_MS = 20 * 60 * 1000
+const SESSION_SWEEP_MS = 5 * 60 * 1000
+
 export function registerChat(app: FastifyInstance, backend?: ChatBackend): void {
   const active = backend ?? (process.env.VULCAIN_CHAT_BACKEND === 'fake' ? new FakeChatBackend() : new PiChatBackend())
-  const sessions = new Map<string, ChatSession>()
+  const sessions = new Map<string, { chat: ChatSession; lastUsed: number }>()
 
-  async function getSession(ws: ResolvedWorkspace, reset: boolean): Promise<ChatSession> {
-    let session = sessions.get(ws.name)
-    if (session && reset) {
-      session.dispose()
-      sessions.delete(ws.name)
-      session = undefined
+  const sessionKey = (wsName: string, threadId: string | undefined): string => `${wsName}:${threadId ?? ''}`
+
+  async function getSession(ws: ResolvedWorkspace, threadId: string | undefined, reset: boolean): Promise<ChatSession> {
+    const key = sessionKey(ws.name, threadId)
+    let entry = sessions.get(key)
+    if (entry && reset) {
+      entry.chat.dispose()
+      sessions.delete(key)
+      entry = undefined
     }
-    if (!session) {
-      session = await active.createSession(ws.root)
-      sessions.set(ws.name, session)
+    if (!entry) {
+      const chat = await active.createSession(ws.root, threadId, ws.name)
+      entry = { chat, lastUsed: Date.now() }
+      sessions.set(key, entry)
     }
-    return session
+    entry.lastUsed = Date.now()
+    return entry.chat
   }
+
+  const sweep = setInterval(() => {
+    const now = Date.now()
+    for (const [key, entry] of sessions) {
+      if (now - entry.lastUsed > SESSION_TTL_MS) {
+        entry.chat.dispose()
+        sessions.delete(key)
+      }
+    }
+  }, SESSION_SWEEP_MS)
+  sweep.unref()
 
   app.post('/api/chat', async (request: FastifyRequest<{ Body: ChatRequestBody }>, reply) => {
     const cfg = loadConfig()
@@ -355,7 +495,7 @@ export function registerChat(app: FastifyInstance, backend?: ChatBackend): void 
 
     let session: ChatSession
     try {
-      session = await getSession(ws, Boolean(request.body?.reset))
+      session = await getSession(ws, request.body?.sessionId, Boolean(request.body?.reset))
     } catch (err) {
       reply.code(500).send({ error: err instanceof Error ? err.message : String(err) })
       return
@@ -389,6 +529,10 @@ export function registerChat(app: FastifyInstance, backend?: ChatBackend): void 
           if (finished) return
           finished = true
           closeParts()
+          if (outcome === 'completed') {
+            const { usage, contextUsage } = session.getUsage()
+            writer.write({ type: 'message-metadata', messageMetadata: { custom: { usage, contextUsage } } })
+          }
           writer.setOutcome(
             outcome === 'completed'
               ? { status: 'completed' }
@@ -471,18 +615,34 @@ export function registerChat(app: FastifyInstance, backend?: ChatBackend): void 
   })
 
   app.post('/api/chat/reset', async (request, reply) => {
+    const body = (request.body as { workspace?: string; sessionId?: string } | undefined) ?? {}
     const cfg = loadConfig()
-    const ws = findWorkspace(cfg, (request.body as { workspace?: string } | undefined)?.workspace ?? '')
+    const ws = findWorkspace(cfg, body.workspace ?? '')
     if (!ws) {
       reply.code(400).send({ error: 'unknown workspace' })
       return
     }
-    const session = sessions.get(ws.name)
-    if (session) {
-      session.dispose()
-      sessions.delete(ws.name)
+    const entry = sessions.get(sessionKey(ws.name, body.sessionId))
+    if (entry) {
+      entry.chat.dispose()
+      sessions.delete(sessionKey(ws.name, body.sessionId))
     }
     reply.send({ ok: true })
+  })
+
+  app.get('/api/chat/sessions', async (request, reply) => {
+    const cfg = loadConfig()
+    const ws = findWorkspace(cfg, (request.query as { workspace?: string }).workspace ?? '')
+    if (!ws) {
+      reply.code(400).send({ error: 'unknown workspace' })
+      return
+    }
+    try {
+      const list = active.listSessions ? await active.listSessions(ws.name, ws.root) : []
+      reply.send({ sessions: list })
+    } catch (err) {
+      reply.code(500).send({ error: err instanceof Error ? err.message : String(err) })
+    }
   })
 
   app.get('/api/chat/commands', async (request, reply) => {
@@ -492,9 +652,10 @@ export function registerChat(app: FastifyInstance, backend?: ChatBackend): void 
       reply.code(400).send({ error: 'unknown workspace' })
       return
     }
+    const sessionId = (request.query as { sessionId?: string }).sessionId
     let session: ChatSession
     try {
-      session = await getSession(ws, false)
+      session = await getSession(ws, sessionId, false)
     } catch (err) {
       reply.code(500).send({ error: err instanceof Error ? err.message : String(err) })
       return

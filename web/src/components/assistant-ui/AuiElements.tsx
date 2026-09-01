@@ -1,12 +1,16 @@
 import { useState, type ReactNode } from 'react'
 import {
+  ActionBarPrimitive,
   ComposerPrimitive,
   MessagePartPrimitive,
   MessagePrimitive,
+  ThreadListPrimitive,
+  ThreadListItemPrimitive,
   ThreadPrimitive,
   groupPartByType,
   useAuiState
 } from '@assistant-ui/react'
+import { useThreadTokenUsage } from '@assistant-ui/ai-sdk'
 import { renderMarkdown } from '../../markdown'
 
 const GROUP = groupPartByType({
@@ -50,6 +54,11 @@ export function AuiThread({ onOpenFile }: { onOpenFile: (path: string) => void }
             <AuiComposer />
           </div>
         </div>
+        <ThreadPrimitive.ScrollToBottom asChild>
+          <button className="aui-scroll-bottom" type="button" aria-label="Descendre en bas">
+            ↓
+          </button>
+        </ThreadPrimitive.ScrollToBottom>
       </ThreadPrimitive.Viewport>
     </ThreadPrimitive.Root>
   )
@@ -57,6 +66,8 @@ export function AuiThread({ onOpenFile }: { onOpenFile: (path: string) => void }
 
 function AuiMessage({ onOpenFile }: { onOpenFile: (path: string) => void }): ReactNode {
   const role = useAuiState((s: any) => s.message.role)
+  const isEditing = useAuiState((s: any) => s.message.composer.isEditing)
+  if (isEditing) return <AuiEditComposer />
   if (role === 'user') return <AuiUserMessage />
   return <AuiAssistantMessage onOpenFile={onOpenFile} />
 }
@@ -66,6 +77,15 @@ function AuiUserMessage(): ReactNode {
     <MessagePrimitive.Root className="aui-msg aui-msg-user" data-role="user">
       <div className="aui-user-bubble">
         <MessagePrimitive.Parts />
+      </div>
+      <div className="aui-message-footer">
+        <ActionBarPrimitive.Root hideWhenRunning autohide="not-last" className="aui-action-bar">
+          <ActionBarPrimitive.Edit asChild>
+            <button type="button" className="icon-btn" title="Modifier">
+              ✎
+            </button>
+          </ActionBarPrimitive.Edit>
+        </ActionBarPrimitive.Root>
       </div>
     </MessagePrimitive.Root>
   )
@@ -100,6 +120,42 @@ function AuiAssistantMessage({ onOpenFile }: { onOpenFile: (path: string) => voi
           }
         }}
       </MessagePrimitive.GroupedParts>
+      <div className="aui-message-footer">
+        <ActionBarPrimitive.Root hideWhenRunning autohide="not-last" className="aui-action-bar">
+          <ActionBarPrimitive.Copy asChild>
+            <button type="button" className="icon-btn" title="Copier">
+              ⧉
+            </button>
+          </ActionBarPrimitive.Copy>
+          <ActionBarPrimitive.Reload asChild>
+            <button type="button" className="icon-btn" title="Régénérer">
+              ⟳
+            </button>
+          </ActionBarPrimitive.Reload>
+        </ActionBarPrimitive.Root>
+      </div>
+    </MessagePrimitive.Root>
+  )
+}
+
+function AuiEditComposer(): ReactNode {
+  return (
+    <MessagePrimitive.Root className="aui-msg aui-edit">
+      <ComposerPrimitive.Root className="aui-composer">
+        <ComposerPrimitive.Input className="aui-composer-input" rows={3} autoFocus />
+        <div className="aui-composer-actions">
+          <ComposerPrimitive.Cancel asChild>
+            <button type="button" className="btn">
+              Annuler
+            </button>
+          </ComposerPrimitive.Cancel>
+          <ComposerPrimitive.Send asChild>
+            <button type="button" className="btn primary">
+              Mettre à jour
+            </button>
+          </ComposerPrimitive.Send>
+        </div>
+      </ComposerPrimitive.Root>
     </MessagePrimitive.Root>
   )
 }
@@ -205,5 +261,66 @@ function AuiComposer(): ReactNode {
         )}
       </div>
     </ComposerPrimitive.Root>
+  )
+}
+
+export function AuiSessionsPanel(): ReactNode {
+  return (
+    <ThreadListPrimitive.Root className="aui-sessions">
+      <ThreadListPrimitive.Items components={{ ThreadListItem: AuiSessionItem }} />
+      <ThreadListPrimitive.New asChild>
+        <button type="button" className="btn">
+          Nouvelle session
+        </button>
+      </ThreadListPrimitive.New>
+    </ThreadListPrimitive.Root>
+  )
+}
+
+function AuiSessionItem(): ReactNode {
+  return (
+    <ThreadListItemPrimitive.Root className="aui-session-item">
+      <ThreadListItemPrimitive.Trigger asChild>
+        <button type="button" className="aui-session-trigger">
+          <span className="aui-session-title">
+            <ThreadListItemPrimitive.Title fallback="Nouvelle session" />
+          </span>
+        </button>
+      </ThreadListItemPrimitive.Trigger>
+      <ThreadListItemPrimitive.Delete asChild>
+        <button type="button" className="icon-btn aui-session-delete" title="Supprimer">
+          ✕
+        </button>
+      </ThreadListItemPrimitive.Delete>
+    </ThreadListItemPrimitive.Root>
+  )
+}
+
+export function AuiUsageBar(): ReactNode {
+  const tokens = useThreadTokenUsage()
+  const contextUsage = useAuiState((s: any) => {
+    const msgs = s.thread.messages
+    for (let i = msgs.length - 1; i >= 0; i -= 1) {
+      const cu = msgs[i]?.metadata?.custom?.contextUsage
+      if (cu) return cu
+    }
+    return undefined
+  })
+  if (!contextUsage || contextUsage.contextWindow <= 0) return null
+  const percent =
+    contextUsage.percent ??
+    (contextUsage.tokens && contextUsage.contextWindow
+      ? Math.round((contextUsage.tokens / contextUsage.contextWindow) * 100)
+      : 0)
+  const warn = percent >= 70
+  return (
+    <div className={`aui-usage${warn ? ' warn' : ''}`} title={`${percent}% du contexte utilisé`}>
+      <div className="aui-usage-track">
+        <div className="aui-usage-fill" style={{ width: `${Math.min(100, percent)}%` }} />
+      </div>
+      <span className="aui-usage-label">
+        {percent}%{tokens?.totalTokens != null ? ` · ${tokens.totalTokens} tok` : ''}
+      </span>
+    </div>
   )
 }

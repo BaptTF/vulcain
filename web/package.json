@@ -12,6 +12,7 @@
   "dependencies": {
     "@ai-sdk/react": "^4.0.90",
     "@assistant-ui/ai-sdk": "^0.0.3",
+    "@assistant-ui/core": "^0.3.16",
     "@assistant-ui/react": "^0.15.17",
     "@codemirror/commands": "^6.7.1",
     "@codemirror/lang-json": "^6.0.1",

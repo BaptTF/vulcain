@@ -156,10 +156,45 @@ check(
 )
 check('chat: finish part received', stream.chunks.some(c => c.type === 'finish'))
 
+const meta = stream.chunks.find(c => c.type === 'message-metadata')
+check(
+  'chat: message-metadata chunk has usage + contextUsage',
+  meta?.messageMetadata?.custom?.usage?.totalTokens === 49 &&
+    meta?.messageMetadata?.custom?.contextUsage?.contextWindow === 200000
+)
+
 const commands = await reqJson('GET', '/api/chat/commands?workspace=Notes')
 check(
   'chat: commands endpoint lists slash commands',
   commands.status === 200 && Array.isArray(commands.body?.commands) && commands.body.commands.some(c => c.name === 'model')
+)
+
+// session isolation: distinct threadIds map to distinct durable pi sessions
+const sessA = await chatStream({ workspace: 'Notes', sessionId: 'sess-a', messages: [{ role: 'user', content: 'hello a' }] })
+const sessB = await chatStream({ workspace: 'Notes', sessionId: 'sess-b', messages: [{ role: 'user', content: 'hello b' }] })
+check('chat: session A stream ok', sessA.status === 200 && sessA.chunks.some(c => c.type === 'finish'))
+check('chat: session B stream ok', sessB.status === 200 && sessB.chunks.some(c => c.type === 'finish'))
+
+const sessionsList = await reqJson('GET', '/api/chat/sessions?workspace=Notes')
+const listed = (sessionsList.body?.sessions ?? []).map(s => s.id)
+check('chat: sessions endpoint lists both thread ids', sessionsList.status === 200 && listed.includes('sess-a') && listed.includes('sess-b'))
+check(
+  'chat: sessions titles derive from first prompt',
+  sessionsList.body?.sessions?.some(s => s.id === 'sess-a' && s.title === 'echo: hello a')
+)
+
+// reuse: a second message on the same thread increments its promptCount
+await chatStream({ workspace: 'Notes', sessionId: 'sess-a', messages: [{ role: 'user', content: 'again' }] })
+const sessionsList2 = await reqJson('GET', '/api/chat/sessions?workspace=Notes')
+const sessAInfo = sessionsList2.body?.sessions?.find(s => s.id === 'sess-a')
+check('chat: same sessionId reuses the session (promptCount increments)', sessAInfo?.messageCount === 2)
+
+const commandsWithSession = await reqJson('GET', '/api/chat/commands?workspace=Notes&sessionId=sess-b')
+check(
+  'chat: commands endpoint works with sessionId param',
+  commandsWithSession.status === 200 &&
+    Array.isArray(commandsWithSession.body?.commands) &&
+    commandsWithSession.body.commands.some(c => c.name === 'model')
 )
 
 const reset = await reqJson('POST', '/api/chat/reset', { workspace: 'Notes' })

@@ -426,6 +426,93 @@ const wsFailures = consoleErrors.filter(e => e.includes('/api/watch'))
 check('no websocket connection errors', wsFailures.length === 0)
 if (wsFailures.length) console.log('  ->', wsFailures[0].slice(0, 160))
 
+// --- chat sessions: sidebar, action bar, usage bar, thread switching, persistence ---
+check('sessions sidebar visible by default', await page.locator('.aui-sessions').isVisible())
+check('first thread listed in sidebar', await page.locator('.aui-session-trigger', { hasText: 'ping' }).first().isVisible())
+check(
+  'action bar copy button on assistant message',
+  await page.locator('.aui-msg-assistant .aui-action-bar button[title="Copier"]').first().isVisible()
+)
+check('usage bar visible after a message', await page.locator('.aui-usage').isVisible())
+
+// the sessions toggle collapses/expands the sidebar
+await page.locator('.chat-header button', { hasText: 'Sessions' }).click()
+await page.waitForTimeout(250)
+check('sessions sidebar hides on toggle', (await page.locator('.aui-sessions').count()) === 0)
+await page.locator('.chat-header button', { hasText: 'Sessions' }).click()
+await page.waitForTimeout(250)
+check('sessions sidebar shows on toggle', await page.locator('.aui-sessions').isVisible())
+
+// start a second thread from the sidebar
+await page.locator('.aui-sessions button', { hasText: 'Nouvelle session' }).click()
+await page.waitForTimeout(300)
+
+// the second thread is a fresh conversation with its own echo
+await page.locator('.aui-composer-input').fill('hello second')
+await page.locator('.aui-composer-input').press('Enter')
+let secondEcho = false
+for (let i = 0; i < 20; i++) {
+  await page.waitForTimeout(500)
+  const text = (await page.locator('.aui-markdown').textContent()) ?? ''
+  if (text.includes('echo: hello second')) {
+    secondEcho = true
+    break
+  }
+}
+check('second thread streams its own echo', secondEcho)
+
+// the initialized second thread now appears in the sidebar
+let secondListed = false
+for (let i = 0; i < 10; i++) {
+  await page.waitForTimeout(300)
+  if ((await page.locator('.aui-session-item').count()) === 2) {
+    secondListed = true
+    break
+  }
+}
+check('second thread appears in sidebar', secondListed)
+
+// switching back to the first thread restores its messages
+await page.locator('.aui-session-trigger', { hasText: 'ping' }).first().click()
+let firstRestored = false
+for (let i = 0; i < 20; i++) {
+  await page.waitForTimeout(300)
+  const text = (await page.locator('.aui-markdown').textContent()) ?? ''
+  if (text.includes('echo: ping') && !text.includes('echo: hello second')) {
+    firstRestored = true
+    break
+  }
+}
+check('switching back restores first thread messages', firstRestored)
+
+// both threads persist across a full reload
+await page.reload({ waitUntil: 'domcontentloaded' })
+await page.waitForTimeout(1500)
+check('both threads listed after reload', (await page.locator('.aui-session-item').count()) === 2)
+let restoredAfterReload = false
+for (let i = 0; i < 20; i++) {
+  await page.waitForTimeout(300)
+  const text = (await page.locator('.aui-markdown').textContent()) ?? ''
+  if (text.includes('echo: ping')) {
+    restoredAfterReload = true
+    break
+  }
+}
+check('last active thread content restored after reload', restoredAfterReload)
+
+// the second thread is still reachable after reload
+await page.locator('.aui-session-trigger', { hasText: 'hello second' }).first().click()
+let secondRestored = false
+for (let i = 0; i < 20; i++) {
+  await page.waitForTimeout(300)
+  const text = (await page.locator('.aui-markdown').textContent()) ?? ''
+  if (text.includes('echo: hello second')) {
+    secondRestored = true
+    break
+  }
+}
+check('second thread content restored after reload', secondRestored)
+
 // --- workspace selector: fast switcher + open-folder explorer ---
 const wsTrigger = page.locator('.topbar .btn', { hasText: '▾' }).first()
 const wsItem = text => page.locator('.ws-menu .ws-menu-item', { hasText: text }).first()
