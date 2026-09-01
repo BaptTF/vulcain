@@ -397,6 +397,7 @@ export default function FileTree({ ws, onOpen }: Props) {
               initialOpenState={Object.fromEntries(nodes.filter(n => n.type === 'dir').map(n => [n.id, true]))}
               onRename={handleRename}
               onMove={handleMove}
+              renderCursor={DropLine}
             >
               {RowView}
             </Tree>
@@ -558,6 +559,37 @@ function RowView({ node, style, dragHandle }: any) {
       ) : (
         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{data.name}</span>
       )}
+    </div>
+  )
+}
+
+function DropLine({ top, left, indent }: { top: number; left: number; indent: number }) {
+  return (
+    <div
+      style={{
+        position: 'absolute',
+        pointerEvents: 'none',
+        top: top - 2,
+        left,
+        right: indent,
+        display: 'flex',
+        alignItems: 'center',
+        zIndex: 1
+      }}
+    >
+      <span
+        style={{
+          width: 4,
+          height: 4,
+          borderRadius: '50%',
+          boxShadow: '0 0 0 3px var(--accent)',
+          flexShrink: 0
+        }}
+      />
+      <span
+        className="vulcain-drop-line"
+        style={{ flex: 1, height: 2, borderRadius: 1, background: 'var(--accent)' }}
+      />
     </div>
   )
 }

@@ -78,9 +78,9 @@ check('new folder created with a name', await page.locator('[role="treeitem"]', 
 
 // --- drag & drop: moving a file highlights the target folder (like VSCode) ---
 const folderRow = page.locator('[role="treeitem"]', { hasText: newFolderName }).first()
-const dndEvent = async ({ type, srcName, dstName }) =>
+const dndEvent = async ({ type, srcName, dstName, pos = 'center' }) =>
   page.evaluate(
-    ({ type, srcName, dstName }) => {
+    ({ type, srcName, dstName, pos }) => {
       const rows = Array.from(document.querySelectorAll('[role="treeitem"]'))
       const srcRow = rows.find(r => r.textContent?.includes(srcName))
       const dstRow = rows.find(r => r.textContent?.includes(dstName))
@@ -93,22 +93,22 @@ const dndEvent = async ({ type, srcName, dstName }) =>
           bubbles: true,
           cancelable: true,
           clientX: rect.left + rect.width / 2,
-          clientY: rect.top + rect.height / 2,
+          clientY: pos === 'top' ? rect.top + 1 : rect.top + rect.height / 2,
           dataTransfer: new DataTransfer()
         })
       )
       return true
     },
-    { type, srcName, dstName }
+    { type, srcName, dstName, pos }
   )
 const dragStart = async name => {
   const ok = await dndEvent({ type: 'dragstart', srcName: name, dstName: name })
   if (ok) await page.waitForTimeout(60) // let react-dnd publish the drag source
   return ok
 }
-const dragHover = async (srcName, dstName) => {
-  const ok = await dndEvent({ type: 'dragenter', srcName, dstName })
-  return ok && (await dndEvent({ type: 'dragover', srcName, dstName }))
+const dragHover = async (srcName, dstName, pos = 'center') => {
+  const ok = await dndEvent({ type: 'dragenter', srcName, dstName, pos })
+  return ok && (await dndEvent({ type: 'dragover', srcName, dstName, pos }))
 }
 const dragDrop = async (srcName, dstName) => {
   const ok = await dndEvent({ type: 'drop', srcName, dstName })
@@ -122,6 +122,23 @@ check(
   'target folder highlighted while dragging',
   await folderRow.locator('[data-row="1"]').evaluate(el => el.classList.contains('is-drop-target'))
 )
+// hover the top edge of a row to trigger the line cursor (insertion indicator)
+check('line cursor hovered', await dragHover(newFileName, 'welcome.md', 'top'))
+await page.waitForTimeout(250)
+check('drop line shown while dragging', await page.locator('.vulcain-drop-line').isVisible())
+check(
+  'drop line stays inside the tree panel',
+  await page.evaluate(() => {
+    const line = document.querySelector('.vulcain-drop-line')
+    const panel = document.querySelector('.panel-tree')
+    if (!line || !panel) return false
+    const lr = line.getBoundingClientRect()
+    const pr = panel.getBoundingClientRect()
+    return lr.left >= pr.left - 1 && lr.right <= pr.right + 1
+  })
+)
+check('target folder hovered again', await dragHover(newFileName, newFolderName))
+await page.waitForTimeout(250)
 check('drop dispatched', await dragDrop(newFileName, newFolderName))
 await page.waitForTimeout(1000) // rename round-trip + watch debounce (250ms) + reload
 const movedRow = page.locator('[role="treeitem"]', { hasText: newFileName }).first()
