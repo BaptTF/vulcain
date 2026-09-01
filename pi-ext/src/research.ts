@@ -14,6 +14,7 @@ export interface ResearchOptions {
   maxSources?: number
   category?: string
   timeRange?: string
+  engines?: string[]
   saveToNote?: boolean
 }
 
@@ -55,8 +56,26 @@ function getRate(injected?: RateLimiter): RateLimiter {
   return defaultRate
 }
 
-async function searchOnce(cfg: VulcainToolsConfig, kind: 'searxng' | 'tavily' | 'camofox', config: WebSearchConfig, params: SearchParams, fetchImpl: FetchImpl): Promise<SearchResponse> {
-  if (kind === 'searxng') return searxngSearch(config.baseUrl ?? process.env.VULCAIN_SEARXNG_URL!, config.engines, params, fetchImpl)
+function configEngines(config: WebSearchConfig): string | undefined {
+  return config.engines || undefined
+}
+
+/**
+ * Resolve the effective SearXNG engines for a request: intersect the agent's
+ * requested engines with the configured allowlist (single source of truth).
+ * Falls back to the full allowlist when nothing requested, or when the
+ * intersection is empty.
+ */
+function resolveEngines(config: WebSearchConfig, requested?: string[]): string | undefined {
+  const base = configEngines(config)?.split(',').map(s => s.trim()).filter(Boolean) ?? []
+  if (base.length === 0) return undefined
+  if (!requested || requested.length === 0) return base.join(',')
+  const allowed = base.filter(e => requested.includes(e))
+  return (allowed.length > 0 ? allowed : base).join(',')
+}
+
+async function searchOnce(kind: 'searxng' | 'tavily' | 'camofox', config: WebSearchConfig, engines: string | undefined, params: SearchParams, fetchImpl: FetchImpl): Promise<SearchResponse> {
+  if (kind === 'searxng') return searxngSearch(config.baseUrl ?? process.env.VULCAIN_SEARXNG_URL!, engines, params, fetchImpl)
   if (kind === 'tavily') return tavilySearch(config.apiKey ?? process.env.TAVILY_API_KEY!, params, fetchImpl)
   return camofoxSearch(config, params)
 }
@@ -64,19 +83,33 @@ async function searchOnce(cfg: VulcainToolsConfig, kind: 'searxng' | 'tavily' | 
 export async function runSearch(cfg: VulcainToolsConfig, params: SearchParams, deps: ResearchDeps = {}): Promise<SearchResponse> {
   const fetchImpl = deps.fetch ?? globalThis.fetch
   const { kind, config } = activeProvider(cfg)
-  const key = `search|${kind}|${params.query}|${params.category ?? ''}|${params.timeRange ?? ''}|${params.maxResults ?? ''}`
+  const engines = resolveEngines(config, params.engines)
+  const effective = { ...params, maxResults: params.maxResults ?? cfg.webSearch?.maxResults ?? 10 }
+  const key = `search|${kind}|${effective.query}|${effective.category ?? ''}|${effective.timeRange ?? ''}|${effective.maxResults}|${engines ?? ''}`
   const cache = getCache(cfg, deps.cache)
   const cached = cache.get(key)
   if (cached) return cached
   const rate = getRate(deps.rate)
+  const defaultEngines = configEngines(config)
+  const explicitSubset = kind === 'searxng' && engines !== defaultEngines
   try {
     await rate.wait()
-    const resp = await searchOnce(cfg, kind, config, params, fetchImpl)
+    let resp = await searchOnce(kind, config, engines, effective, fetchImpl)
+    if (explicitSubset && resp.results.length === 0) {
+      resp = await searchOnce(kind, config, defaultEngines, effective, fetchImpl)
+    }
     cache.set(key, resp)
     return resp
   } catch (err) {
+    if (explicitSubset) {
+      try {
+        const resp = await searchOnce(kind, config, defaultEngines, effective, fetchImpl)
+        cache.set(key, resp)
+        return resp
+      } catch {}
+    }
     if (kind !== 'camofox') {
-      const resp = await camofoxSearch(config, params)
+      const resp = await camofoxSearch(config, effective)
       cache.set(key, resp)
       return resp
     }
@@ -109,21 +142,23 @@ export async function runResearch(cfg: VulcainToolsConfig, opts: ResearchOptions
   const queries = Array.from(new Set([opts.topic, ...(opts.subQueries ?? [])]))
   const all: SearchResult[] = []
   let answer: string | undefined
-  const maxResults = cfg.webSearch?.maxResults ?? 6
+  const maxResults = cfg.webSearch?.maxResults ?? 10
 
-  const responses = await mapLimit(queries, 3, q => runSearch(cfg, { query: q, category: opts.category, timeRange: opts.timeRange, maxResults }, deps))
+  const responses = await mapLimit(queries, 5, q =>
+    runSearch(cfg, { query: q, category: opts.category, timeRange: opts.timeRange, maxResults, engines: opts.engines }, deps)
+  )
   responses.forEach((resp, i) => {
     all.push(...resp.results)
     if (i === 0 && resp.answer) answer = resp.answer
   })
 
   const ranked0 = rankByScore(dedupeByUrl(all))
-  const maxSources = opts.maxSources ?? cfg.research?.maxSources ?? 3
+  const maxSources = opts.maxSources ?? cfg.research?.maxSources ?? 6
   let sources = ranked0.slice(0, maxSources)
   let ranked = ranked0
 
   if (opts.depth === 'deep') {
-    sources = await mapLimit(sources, 2, async s => {
+    sources = await mapLimit(sources, 3, async s => {
       try {
         const text = await readUrl(cfg, s.url, fetchImpl)
         return text ? { ...s, content: `[extrait] ${text.slice(0, 6000)}` } : s

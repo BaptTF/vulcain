@@ -27,8 +27,9 @@ export default function (pi: any) {
     parameters: Type.Object({
       query: Type.String({ description: 'The search query' }),
       category: Type.Optional(Type.String({ description: 'Result category: general, news, science, academic, it, files (SearXNG) or news, finance (Tavily)' })),
-      timeRange: Type.Optional(Type.String({ description: 'Tavily time range: day, week, month, year' })),
-      maxResults: Type.Optional(Type.Number({ description: 'Max results (default from config, 6)' }))
+      timeRange: Type.Optional(Type.String({ description: 'Time range: day, week, month, year' })),
+      engines: Type.Optional(Type.Array(Type.String(), { description: 'Subset of the configured SearXNG engines to use (e.g. ["wikipedia"], ["bing","brave"]). Falls back to the configured engines.' })),
+      maxResults: Type.Optional(Type.Number({ description: 'Max results (default from config, 10)' }))
     }),
     async execute(_id: string, params: any) {
       const cfg = loadVulcainConfig().tools ?? {}
@@ -36,6 +37,7 @@ export default function (pi: any) {
         query: params.query,
         category: params.category,
         timeRange: params.timeRange,
+        engines: params.engines,
         maxResults: params.maxResults
       })
       return { content: [{ type: 'text', text: formatSearchResults(params.query, resp.results, resp.answer) }], details: {} }
@@ -51,9 +53,10 @@ export default function (pi: any) {
       topic: Type.String({ description: 'The research topic / main query' }),
       subQueries: Type.Optional(Type.Array(Type.String(), { description: 'Additional queries to run in parallel' })),
       depth: Type.Optional(Type.Union([Type.Literal('quick'), Type.Literal('deep')], { description: 'deep extracts the top sources content' })),
-      maxSources: Type.Optional(Type.Number({ description: 'Max sources to keep / extract (default 3)' })),
+      maxSources: Type.Optional(Type.Number({ description: 'Max sources to keep / extract (default 6)' })),
       category: Type.Optional(Type.String({ description: 'Result category (see web_search)' })),
-      timeRange: Type.Optional(Type.String({ description: 'Tavily time range: day, week, month, year' })),
+      timeRange: Type.Optional(Type.String({ description: 'Time range: day, week, month, year' })),
+      engines: Type.Optional(Type.Array(Type.String(), { description: 'Subset of the configured SearXNG engines (see web_search)' })),
       saveToNote: Type.Optional(Type.Boolean({ description: 'Write the brief to .research/<topic>.md in the workspace' }))
     }),
     async execute(_id: string, params: any) {
@@ -65,6 +68,7 @@ export default function (pi: any) {
         maxSources: params.maxSources,
         category: params.category,
         timeRange: params.timeRange,
+        engines: params.engines,
         saveToNote: params.saveToNote
       })
       return { content: [{ type: 'text', text: out.note ? `${out.brief}\n\nSaved to ${out.note}` : out.brief }], details: {} }

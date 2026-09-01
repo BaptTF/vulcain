@@ -40,6 +40,7 @@ export interface SearchParams {
   category?: string
   timeRange?: string
   maxResults?: number
+  engines?: string[]
 }
 
 export interface SearchResult {
@@ -102,6 +103,10 @@ async function closeTabQuietly(tabId: string): Promise<void> {
   } catch {}
 }
 
+function isTabGone(err: unknown): boolean {
+  return err instanceof Error && /-> 410:/.test(err.message)
+}
+
 function toResults(list: any[]): SearchResult[] {
   return (list ?? [])
     .map((r: any) => ({
@@ -121,6 +126,7 @@ export async function searxngSearch(baseUrl: string, engines: string | undefined
   u.searchParams.set('safesearch', '1')
   if (params.category && params.category !== 'general') u.searchParams.set('categories', params.category)
   if (engines) u.searchParams.set('engines', engines)
+  if (params.timeRange) u.searchParams.set('time_range', params.timeRange)
   const res = await fetchImpl(u.toString())
   if (!res.ok) throw new Error(`searxng ${u.pathname} -> ${res.status}: ${(await res.text()).slice(0, 300)}`)
   const data = await res.json()
@@ -156,15 +162,21 @@ export async function tavilySearch(apiKey: string, params: SearchParams, fetchIm
 
 export async function camofoxSearch(config: WebSearchConfig, params: SearchParams): Promise<SearchResponse> {
   const macro = config.macro ?? '@google_search'
-  let tabId = ''
-  try {
-    const tab = await camofox('POST', '/tabs', { userId: 'vulcain', sessionKey: 'vulcain-search' })
-    tabId = tab.tabId
-    await camofox('POST', `/tabs/${tabId}/navigate`, { userId: 'vulcain', macro, query: params.query })
-    return { results: [], answer: await snapshot(tabId) }
-  } finally {
-    if (tabId) void closeTabQuietly(tabId)
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    let tabId = ''
+    try {
+      const tab = await camofox('POST', '/tabs', { userId: 'vulcain', sessionKey: 'vulcain-search' })
+      tabId = tab.tabId
+      await camofox('POST', `/tabs/${tabId}/navigate`, { userId: 'vulcain', macro, query: params.query })
+      return { results: [], answer: await snapshot(tabId) }
+    } catch (err) {
+      if (attempt === 0 && isTabGone(err)) continue
+      throw err
+    } finally {
+      if (tabId) void closeTabQuietly(tabId)
+    }
   }
+  throw new Error('unreachable')
 }
 
 export async function tavilyExtract(apiKey: string, url: string, fetchImpl: FetchImpl): Promise<string> {
@@ -180,12 +192,19 @@ export async function tavilyExtract(apiKey: string, url: string, fetchImpl: Fetc
 }
 
 export async function readUrlViaCamofox(url: string): Promise<string> {
-  const tab = await camofox('POST', '/tabs', { userId: 'vulcain', sessionKey: 'vulcain-read', url })
-  try {
-    return await snapshot(tab.tabId)
-  } finally {
-    void closeTabQuietly(tab.tabId)
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    let tab
+    try {
+      tab = await camofox('POST', '/tabs', { userId: 'vulcain', sessionKey: 'vulcain-read', url })
+      return await snapshot(tab.tabId)
+    } catch (err) {
+      if (attempt === 0 && isTabGone(err)) continue
+      throw err
+    } finally {
+      if (tab) void closeTabQuietly(tab.tabId)
+    }
   }
+  throw new Error('unreachable')
 }
 
 export async function readUrl(cfg: VulcainToolsConfig, url: string, fetchImpl: FetchImpl): Promise<string> {
