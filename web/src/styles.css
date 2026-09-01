@@ -375,6 +375,7 @@ button, input, textarea, select {
 }
 
 .panel-chat {
+  position: relative;
   height: 100%;
   display: flex;
   flex-direction: column;
@@ -390,6 +391,13 @@ button, input, textarea, select {
   padding: 8px 10px;
   border-bottom: 1px solid var(--border);
   font-weight: 600;
+}
+
+.chat-header .btn.chat-sessions-btn {
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .chat-status {
@@ -803,6 +811,7 @@ button, input, textarea, select {
 .aui-thread-footer {
   margin-top: auto;
   padding-top: 12px;
+  position: relative;
 }
 
 .aui-msg {
@@ -946,34 +955,40 @@ button, input, textarea, select {
   overflow-wrap: anywhere;
 }
 
-/* chat sessions sidebar */
-.chat-body {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: row;
-}
-
 .btn.active {
   background: var(--accent-soft);
   border-color: var(--accent);
   color: var(--text);
 }
 
+/* chat sessions dropdown */
 .aui-sessions {
-  width: 200px;
-  flex-shrink: 0;
+  position: absolute;
+  top: 42px;
+  right: 8px;
+  width: 240px;
+  max-height: 60vh;
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 10px;
-  border-right: 1px solid var(--border);
+  gap: 4px;
+  padding: 6px;
   background: var(--panel-2);
-  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  z-index: 60;
 }
 
-.aui-sessions > .btn {
+.aui-sessions .btn {
   flex-shrink: 0;
+}
+
+.aui-sessions-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-height: 0;
 }
 
 .aui-session-item {
@@ -1055,12 +1070,11 @@ button, input, textarea, select {
 
 /* scroll-to-bottom floating button */
 .aui-scroll-bottom {
-  position: sticky;
-  bottom: 74px;
-  flex-shrink: 0;
-  margin: 0 auto;
-  width: 32px;
-  height: 32px;
+  position: absolute;
+  right: 16px;
+  bottom: calc(100% + 10px);
+  width: 30px;
+  height: 30px;
   border-radius: 99px;
   border: 1px solid var(--border);
   background: var(--panel-2);
@@ -1074,6 +1088,11 @@ button, input, textarea, select {
 .aui-scroll-bottom:hover {
   border-color: var(--accent);
   color: var(--accent);
+}
+
+/* the ScrollToBottom primitive renders a disabled button at full scroll; hide it */
+.aui-scroll-bottom:disabled {
+  display: none;
 }
 
 /* message action bar */

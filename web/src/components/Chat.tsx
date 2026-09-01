@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AssistantRuntimeProvider, useAui, useAuiState, useRemoteThreadListRuntime } from '@assistant-ui/react'
 import { createLocalStorageAdapter, createSimpleTitleAdapter } from '@assistant-ui/core/react'
 import { AssistantChatTransport, useAISDKError, useChatRuntime } from '@assistant-ui/ai-sdk'
@@ -18,16 +18,20 @@ const asyncStorage = {
 
 function ChatHeader({
   sessionsOpen,
-  onToggleSessions
+  onToggleSessions,
+  sessionsBtnRef
 }: {
   sessionsOpen: boolean
   onToggleSessions: () => void
+  sessionsBtnRef: React.RefObject<HTMLButtonElement>
 }): React.ReactNode {
   const isRunning = useAuiState((s: any) => s.thread.isRunning)
   const error = useAISDKError()
+  const activeTitle = useAuiState((s: any) => s.threadListItem?.title)
 
   const status = isRunning ? 'working' : error ? 'error' : 'ready'
   const statusLabel = isRunning ? 'en cours…' : error ? 'erreur' : 'prêt'
+  const label = activeTitle ? `${activeTitle} ▾` : 'Sessions ▾'
 
   return (
     <div className="chat-header">
@@ -36,21 +40,45 @@ function ChatHeader({
       <AuiUsageBar />
       <div className="spacer" />
       <button
-        className={`btn${sessionsOpen ? ' active' : ''}`}
+        ref={sessionsBtnRef}
+        className={`btn chat-sessions-btn${sessionsOpen ? ' active' : ''}`}
         onClick={onToggleSessions}
+        aria-haspopup="true"
         aria-expanded={sessionsOpen}
       >
-        Sessions
+        {label}
       </button>
     </div>
   )
 }
 
 export default function Chat({ ws, onOpenFile }: Props): React.ReactNode {
-  const [sessionsOpen, setSessionsOpen] = useState(true)
+  const [sessionsOpen, setSessionsOpen] = useState(false)
   const [activeThreadId, setActiveThreadId] = useState<string | undefined>(
     () => localStorage.getItem(`vulcain.chat.active.${ws}`) ?? undefined
   )
+  const sessionsRef = useRef<HTMLDivElement>(null)
+  const sessionsBtnRef = useRef<HTMLButtonElement>(null)
+
+  useEffect(() => {
+    if (!sessionsOpen) return
+    const onPointerDown = (e: MouseEvent) => {
+      const target = e.target as Element | null
+      if (!target) return
+      if (sessionsRef.current?.contains(target)) return
+      if (sessionsBtnRef.current?.contains(target)) return
+      setSessionsOpen(false)
+    }
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setSessionsOpen(false)
+    }
+    document.addEventListener('mousedown', onPointerDown)
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown)
+      document.removeEventListener('keydown', onKeyDown)
+    }
+  }, [sessionsOpen])
 
   const adapter = useMemo(
     () =>
@@ -95,11 +123,13 @@ export default function Chat({ ws, onOpenFile }: Props): React.ReactNode {
   return (
     <AssistantRuntimeProvider runtime={runtime}>
       <div className="panel-chat">
-        <ChatHeader sessionsOpen={sessionsOpen} onToggleSessions={() => setSessionsOpen(o => !o)} />
-        <div className="chat-body">
-          {sessionsOpen && <AuiSessionsPanel />}
-          <AuiThread onOpenFile={onOpenFile} />
-        </div>
+        <ChatHeader
+          sessionsOpen={sessionsOpen}
+          onToggleSessions={() => setSessionsOpen(o => !o)}
+          sessionsBtnRef={sessionsBtnRef}
+        />
+        {sessionsOpen && <AuiSessionsPanel ref={sessionsRef} onSelect={() => setSessionsOpen(false)} />}
+        <AuiThread onOpenFile={onOpenFile} />
       </div>
     </AssistantRuntimeProvider>
   )

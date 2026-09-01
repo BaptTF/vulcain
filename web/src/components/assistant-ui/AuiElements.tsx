@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react'
+import { forwardRef, useState, type ReactNode } from 'react'
 import {
   ActionBarPrimitive,
   ComposerPrimitive,
@@ -52,13 +52,13 @@ export function AuiThread({ onOpenFile }: { onOpenFile: (path: string) => void }
           </div>
           <div className="aui-thread-footer">
             <AuiComposer />
+            <ThreadPrimitive.ScrollToBottom asChild>
+              <button className="aui-scroll-bottom" type="button" aria-label="Descendre en bas">
+                ↓
+              </button>
+            </ThreadPrimitive.ScrollToBottom>
           </div>
         </div>
-        <ThreadPrimitive.ScrollToBottom asChild>
-          <button className="aui-scroll-bottom" type="button" aria-label="Descendre en bas">
-            ↓
-          </button>
-        </ThreadPrimitive.ScrollToBottom>
       </ThreadPrimitive.Viewport>
     </ThreadPrimitive.Root>
   )
@@ -264,24 +264,28 @@ function AuiComposer(): ReactNode {
   )
 }
 
-export function AuiSessionsPanel(): ReactNode {
-  return (
-    <ThreadListPrimitive.Root className="aui-sessions">
-      <ThreadListPrimitive.Items components={{ ThreadListItem: AuiSessionItem }} />
-      <ThreadListPrimitive.New asChild>
-        <button type="button" className="btn">
-          Nouvelle session
-        </button>
-      </ThreadListPrimitive.New>
-    </ThreadListPrimitive.Root>
-  )
-}
+export const AuiSessionsPanel = forwardRef<HTMLDivElement, { onSelect?: () => void }>(
+  function AuiSessionsPanel({ onSelect }, ref): ReactNode {
+    return (
+      <div className="aui-sessions" ref={ref}>
+        <ThreadListPrimitive.Root className="aui-sessions-list">
+          <ThreadListPrimitive.Items components={{ ThreadListItem: () => <AuiSessionItem onSelect={onSelect} /> }} />
+          <ThreadListPrimitive.New asChild>
+            <button type="button" className="btn" onClick={() => onSelect?.()}>
+              Nouvelle session
+            </button>
+          </ThreadListPrimitive.New>
+        </ThreadListPrimitive.Root>
+      </div>
+    )
+  }
+)
 
-function AuiSessionItem(): ReactNode {
+function AuiSessionItem({ onSelect }: { onSelect?: () => void }): ReactNode {
   return (
     <ThreadListItemPrimitive.Root className="aui-session-item">
       <ThreadListItemPrimitive.Trigger asChild>
-        <button type="button" className="aui-session-trigger">
+        <button type="button" className="aui-session-trigger" onClick={() => onSelect?.()}>
           <span className="aui-session-title">
             <ThreadListItemPrimitive.Title fallback="Nouvelle session" />
           </span>

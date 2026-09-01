@@ -6,6 +6,8 @@ const check = (name, cond) => {
   results.push(cond)
   console.log(`${cond ? 'PASS' : 'FAIL'} ${name}`)
 }
+// a thread can hold several assistant messages; join all rendered markdown
+const threadText = async () => (await page.locator('.aui-markdown').allTextContents()).join('\n')
 
 const browser = await chromium.launch()
 const page = await browser.newPage()
@@ -414,7 +416,7 @@ let echoReceived = false
 let toolCardSeen = false
 for (let i = 0; i < 20; i++) {
   await page.waitForTimeout(500)
-  const text = (await page.locator('.aui-markdown').textContent()) ?? ''
+  const text = await threadText()
   if (text.includes('echo: ping')) echoReceived = true
   if (await page.locator('.tool-card').count()) toolCardSeen = true
   if (echoReceived && toolCardSeen) break
@@ -422,30 +424,123 @@ for (let i = 0; i < 20; i++) {
 check('message sent streams the echo back', echoReceived)
 check('tool call rendered as a card', toolCardSeen)
 
+// scroll-to-bottom button: hidden at the bottom, appears once the user scrolls up
+// wait for the ping run to complete (composer back to "Envoyer")
+for (let i = 0; i < 10; i++) {
+  await page.waitForTimeout(200)
+  if (await page.locator('.aui-composer-actions .btn', { hasText: 'Envoyer' }).isVisible()) break
+}
+const scrollBtn = page.locator('.aui-scroll-bottom')
+check('scroll-to-bottom button hidden at the bottom', !(await scrollBtn.isVisible()))
+// a long message overflows the viewport so the button can appear
+await page.locator('.aui-composer-input').fill('Ceci est un long message destiné à faire déborder le fil de la zone visible du chat.\n'.repeat(40))
+await page.locator('.aui-composer-input').press('Enter')
+let longEcho = false
+for (let i = 0; i < 20; i++) {
+  await page.waitForTimeout(300)
+  const text = await threadText()
+  if (text.includes('Ceci est un long message')) {
+    longEcho = true
+    break
+  }
+}
+check('long message streams back', longEcho)
+for (let i = 0; i < 10; i++) {
+  await page.waitForTimeout(200)
+  if (await page.locator('.aui-composer-actions .btn', { hasText: 'Envoyer' }).isVisible()) break
+}
+check('scroll-to-bottom button visible once the thread overflows', await scrollBtn.isVisible())
+// scroll to the real bottom -> button hides
+await page.evaluate(() => {
+  const v = document.querySelector('.aui-viewport')
+  if (v) v.scrollTop = v.scrollHeight
+})
+let scrollBtnHidden = false
+for (let i = 0; i < 10; i++) {
+  await page.waitForTimeout(200)
+  if (!(await scrollBtn.isVisible())) {
+    scrollBtnHidden = true
+    break
+  }
+}
+check('scroll-to-bottom button hides at full scroll', scrollBtnHidden)
+// scroll back up -> button reappears
+await page.evaluate(() => {
+  const v = document.querySelector('.aui-viewport')
+  if (v) v.scrollTop = 0
+})
+let scrollBtnSeen = false
+for (let i = 0; i < 10; i++) {
+  await page.waitForTimeout(200)
+  if (await scrollBtn.isVisible()) {
+    scrollBtnSeen = true
+    break
+  }
+}
+check('scroll-to-bottom button visible after scrolling up', scrollBtnSeen)
+await scrollBtn.click()
+await page.waitForTimeout(400)
+check('scroll-to-bottom button hides after returning to bottom', !(await scrollBtn.isVisible()))
+
 const wsFailures = consoleErrors.filter(e => e.includes('/api/watch'))
 check('no websocket connection errors', wsFailures.length === 0)
 if (wsFailures.length) console.log('  ->', wsFailures[0].slice(0, 160))
 
-// --- chat sessions: sidebar, action bar, usage bar, thread switching, persistence ---
-check('sessions sidebar visible by default', await page.locator('.aui-sessions').isVisible())
-check('first thread listed in sidebar', await page.locator('.aui-session-trigger', { hasText: 'ping' }).first().isVisible())
+// --- chat sessions: dropdown, action bar, usage bar, thread switching, persistence ---
+const sessionsBtn = page.locator('.chat-header .chat-sessions-btn')
+const sessionsDropdown = page.locator('.aui-sessions')
+
+check('sessions dropdown hidden by default', (await sessionsDropdown.count()) === 0)
+let activeTitleSeen = false
+for (let i = 0; i < 10; i++) {
+  await page.waitForTimeout(200)
+  if (((await sessionsBtn.textContent()) ?? '').includes('ping')) {
+    activeTitleSeen = true
+    break
+  }
+}
+check('header button shows active session title', activeTitleSeen)
+check('header button announces popup', (await sessionsBtn.getAttribute('aria-haspopup')) === 'true')
+check('header button reflects closed state', (await sessionsBtn.getAttribute('aria-expanded')) === 'false')
+
+// open the dropdown from the header button
+await sessionsBtn.click()
+await page.waitForTimeout(250)
+check('sessions dropdown opens from header button', await sessionsDropdown.isVisible())
+check('header button reflects open state', (await sessionsBtn.getAttribute('aria-expanded')) === 'true')
+check('first thread listed in dropdown', await page.locator('.aui-session-trigger', { hasText: 'ping' }).first().isVisible())
 check(
   'action bar copy button on assistant message',
   await page.locator('.aui-msg-assistant .aui-action-bar button[title="Copier"]').first().isVisible()
 )
 check('usage bar visible after a message', await page.locator('.aui-usage').isVisible())
 
-// the sessions toggle collapses/expands the sidebar
-await page.locator('.chat-header button', { hasText: 'Sessions' }).click()
+// outside click closes the dropdown
+await page.locator('.aui-composer-input').click()
 await page.waitForTimeout(250)
-check('sessions sidebar hides on toggle', (await page.locator('.aui-sessions').count()) === 0)
-await page.locator('.chat-header button', { hasText: 'Sessions' }).click()
-await page.waitForTimeout(250)
-check('sessions sidebar shows on toggle', await page.locator('.aui-sessions').isVisible())
+check('sessions dropdown closes on outside click', (await sessionsDropdown.count()) === 0)
 
-// start a second thread from the sidebar
+// Escape closes the dropdown
+await sessionsBtn.click()
+await page.waitForTimeout(250)
+await page.keyboard.press('Escape')
+await page.waitForTimeout(250)
+check('sessions dropdown closes on Escape', (await sessionsDropdown.count()) === 0)
+
+// the sessions toggle collapses/expands the dropdown
+await sessionsBtn.click()
+await page.waitForTimeout(250)
+check('sessions dropdown shows on toggle', await sessionsDropdown.isVisible())
+await sessionsBtn.click()
+await page.waitForTimeout(250)
+check('sessions dropdown hides on toggle', (await sessionsDropdown.count()) === 0)
+
+// start a second thread from the dropdown
+await sessionsBtn.click()
+await page.waitForTimeout(250)
 await page.locator('.aui-sessions button', { hasText: 'Nouvelle session' }).click()
 await page.waitForTimeout(300)
+check('dropdown closes after creating a session', (await sessionsDropdown.count()) === 0)
 
 // the second thread is a fresh conversation with its own echo
 await page.locator('.aui-composer-input').fill('hello second')
@@ -453,7 +548,7 @@ await page.locator('.aui-composer-input').press('Enter')
 let secondEcho = false
 for (let i = 0; i < 20; i++) {
   await page.waitForTimeout(500)
-  const text = (await page.locator('.aui-markdown').textContent()) ?? ''
+  const text = await threadText()
   if (text.includes('echo: hello second')) {
     secondEcho = true
     break
@@ -461,7 +556,9 @@ for (let i = 0; i < 20; i++) {
 }
 check('second thread streams its own echo', secondEcho)
 
-// the initialized second thread now appears in the sidebar
+// the initialized second thread now appears in the dropdown
+await sessionsBtn.click()
+await page.waitForTimeout(250)
 let secondListed = false
 for (let i = 0; i < 10; i++) {
   await page.waitForTimeout(300)
@@ -470,29 +567,32 @@ for (let i = 0; i < 10; i++) {
     break
   }
 }
-check('second thread appears in sidebar', secondListed)
+check('second thread appears in dropdown', secondListed)
 
-// switching back to the first thread restores its messages
+// switching back to the first thread restores its messages (dropdown closes on select)
 await page.locator('.aui-session-trigger', { hasText: 'ping' }).first().click()
 let firstRestored = false
 for (let i = 0; i < 20; i++) {
   await page.waitForTimeout(300)
-  const text = (await page.locator('.aui-markdown').textContent()) ?? ''
+  const text = await threadText()
   if (text.includes('echo: ping') && !text.includes('echo: hello second')) {
     firstRestored = true
     break
   }
 }
 check('switching back restores first thread messages', firstRestored)
+check('dropdown closes after selecting a session', (await sessionsDropdown.count()) === 0)
 
 // both threads persist across a full reload
 await page.reload({ waitUntil: 'domcontentloaded' })
 await page.waitForTimeout(1500)
+await sessionsBtn.click()
+await page.waitForTimeout(250)
 check('both threads listed after reload', (await page.locator('.aui-session-item').count()) === 2)
 let restoredAfterReload = false
 for (let i = 0; i < 20; i++) {
   await page.waitForTimeout(300)
-  const text = (await page.locator('.aui-markdown').textContent()) ?? ''
+  const text = await threadText()
   if (text.includes('echo: ping')) {
     restoredAfterReload = true
     break
@@ -500,12 +600,12 @@ for (let i = 0; i < 20; i++) {
 }
 check('last active thread content restored after reload', restoredAfterReload)
 
-// the second thread is still reachable after reload
+// the second thread is still reachable after reload (dropdown is still open)
 await page.locator('.aui-session-trigger', { hasText: 'hello second' }).first().click()
 let secondRestored = false
 for (let i = 0; i < 20; i++) {
   await page.waitForTimeout(300)
-  const text = (await page.locator('.aui-markdown').textContent()) ?? ''
+  const text = await threadText()
   if (text.includes('echo: hello second')) {
     secondRestored = true
     break
