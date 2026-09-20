@@ -59,6 +59,12 @@ export async function readFile(ws: string, path: string): Promise<string> {
   return await r.text()
 }
 
+export async function readFileBytes(ws: string, path: string): Promise<Uint8Array | null> {
+  const r = await fetch(fileUrl(ws, path))
+  if (!r.ok) return null
+  return new Uint8Array(await r.arrayBuffer())
+}
+
 export function writeFile(ws: string, path: string, content: string): Promise<void> {
   return req('/api/fs/file', { method: 'PUT', body: JSON.stringify({ ws, path, content }) })
 }

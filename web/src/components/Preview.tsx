@@ -1,55 +1,60 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { renderMarkdown } from '../markdown'
-import { typstSvg } from '../typst'
+import * as api from '../api'
+import { bytesToBase64, siblingPdfPath, ensureTypstCompiler, typstPdfBytes } from '../typst'
+import { PdfViewer } from './PdfViewer'
+
+const COMPILE_DEBOUNCE = 500
 
 export function MarkdownView({ source }: { source: string }) {
   const html = useMemo(() => renderMarkdown(source), [source])
   return <div className="md-body" dangerouslySetInnerHTML={{ __html: html }} />
 }
 
-export function TypstView({ source }: { source: string }) {
-  const [svg, setSvg] = useState('')
+export function TypstView({ ws, path, source }: { ws: string; path: string; source: string }) {
+  const [bytes, setBytes] = useState<Uint8Array | null>(null)
   const [err, setErr] = useState('')
-  const containerRef = useRef<HTMLDivElement>(null)
+  const pdfPath = siblingPdfPath(path)
 
   useEffect(() => {
     let cancelled = false
+    void ensureTypstCompiler()
+    api
+      .readFileBytes(ws, pdfPath)
+      .then(existing => {
+        if (!cancelled && existing) setBytes(existing)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [ws, pdfPath])
+
+  useEffect(() => {
+    if (!source) return
+    let cancelled = false
     const timer = window.setTimeout(async () => {
       try {
-        const out = await typstSvg(source)
-        if (!cancelled) {
-          setSvg(out)
-          setErr('')
-        }
+        const out = await typstPdfBytes(source)
+        if (cancelled) return
+        await api.writeFileBase64(ws, pdfPath, bytesToBase64(out))
+        if (cancelled) return
+        setBytes(out)
+        setErr('')
       } catch (e: any) {
         if (!cancelled) setErr(String(e?.message ?? e))
       }
-    }, 500)
+    }, COMPILE_DEBOUNCE)
     return () => {
       cancelled = true
       window.clearTimeout(timer)
     }
-  }, [source])
-
-  useEffect(() => {
-    if (!svg || !containerRef.current) return
-    const svgElem = containerRef.current.querySelector('svg')
-    if (!svgElem) return
-    const w = Number.parseFloat(svgElem.getAttribute('width') ?? '')
-    const h = Number.parseFloat(svgElem.getAttribute('height') ?? '')
-    if (!w || !h) return
-    const cw = containerRef.current.clientWidth
-    svgElem.setAttribute('width', String(cw))
-    svgElem.setAttribute('height', String((h * cw) / w))
-  }, [svg])
+  }, [ws, pdfPath, source])
 
   return (
-    <div className="preview-pane">
-      {err ? (
-        <pre className="typ-error">{err}</pre>
-      ) : (
-        <div className="typ-body" ref={containerRef} dangerouslySetInnerHTML={{ __html: svg }} />
-      )}
+    <div className="typ-preview">
+      {err ? <pre className="typ-error">{err}</pre> : null}
+      {bytes ? <PdfViewer file={bytes} /> : err ? null : <div className="empty-state">Compilation…</div>}
     </div>
   )
 }

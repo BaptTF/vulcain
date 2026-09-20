@@ -2,14 +2,15 @@ import { $typst } from '@myriaddreamin/typst.ts/dist/esm/index.mjs'
 
 let initPromise: Promise<void> | null = null
 
-async function ensureInit(): Promise<void> {
+export function siblingPdfPath(typPath: string): string {
+  return typPath.replace(/\.typ$/i, '') + '.pdf'
+}
+
+export async function ensureTypstCompiler(): Promise<void> {
   if (!initPromise) {
     initPromise = (async () => {
       $typst.setCompilerInitOptions({
         getModule: () => '/assets/typst_ts_web_compiler_bg.wasm'
-      })
-      $typst.setRendererInitOptions({
-        getModule: () => '/assets/typst_ts_renderer_bg.wasm'
       })
     })()
     initPromise.catch(() => {
@@ -19,13 +20,8 @@ async function ensureInit(): Promise<void> {
   return initPromise
 }
 
-export async function typstSvg(source: string): Promise<string> {
-  await ensureInit()
-  return (await $typst.svg({ mainContent: source })) as unknown as string
-}
-
 export async function typstPdfBytes(source: string): Promise<Uint8Array> {
-  await ensureInit()
+  await ensureTypstCompiler()
   const data = await $typst.pdf({ mainContent: source })
   return data as Uint8Array
 }

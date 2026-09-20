@@ -26,7 +26,8 @@ import { indentWithTab } from '@codemirror/commands'
 import { toast } from 'sonner'
 import { subscribeWatch } from '../watch-client'
 import * as api from '../api'
-import { bytesToBase64, typstPdfBytes } from '../typst'
+import { bytesToBase64, siblingPdfPath, typstPdfBytes } from '../typst'
+import { PdfViewer } from './PdfViewer'
 import { MarkdownView, TypstView } from './Preview'
 
 export interface Tab {
@@ -269,7 +270,7 @@ export default function EditorPane({
     if (!activePath || !content) return
     try {
       const bytes = await typstPdfBytes(content)
-      const pdfPath = activePath.replace(/\.typ$/i, '') + '.pdf'
+      const pdfPath = siblingPdfPath(activePath)
       await api.writeFileBase64(ws, pdfPath, bytesToBase64(bytes))
       const name = pdfPath.split('/').pop() ?? 'document.pdf'
       const a = document.createElement('a')
@@ -323,7 +324,9 @@ export default function EditorPane({
           <img src={api.fileUrl(ws, activePath)} style={{ maxWidth: '90%', maxHeight: '90%' }} alt={activePath} />
         </div>
       ) : /\.pdf$/i.test(activePath) ? (
-        <iframe src={api.fileUrl(ws, activePath)} style={{ flex: 1, border: 'none' }} title={activePath} />
+        <div className="editor-pdf">
+          <PdfViewer file={api.fileUrl(ws, activePath)} />
+        </div>
       ) : (
         <div className="editor-area">
           <div className="editor-half">
@@ -343,7 +346,15 @@ export default function EditorPane({
   )
 }
 
-export function PreviewPane({ path, content }: { path: string | null; content: string }) {
+export function PreviewPane({
+  ws,
+  path,
+  content
+}: {
+  ws: string
+  path: string | null
+  content: string
+}) {
   const isMd = !!path && /\.md$/i.test(path)
   const isTyp = !!path && /\.typ$/i.test(path)
   if (!path || (!isMd && !isTyp)) {
@@ -354,8 +365,8 @@ export function PreviewPane({ path, content }: { path: string | null; content: s
     )
   }
   return (
-    <div className="panel-preview" data-testid="preview">
-      {isMd ? <MarkdownView source={content} /> : <TypstView source={content} />}
+    <div className={`panel-preview${isTyp ? ' panel-preview-typ' : ''}`} data-testid="preview">
+      {isMd ? <MarkdownView source={content} /> : <TypstView key={path} ws={ws} path={path} source={content} />}
     </div>
   )
 }

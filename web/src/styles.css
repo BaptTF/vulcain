@@ -372,6 +372,13 @@ button, input, textarea, select {
   padding: 24px 32px;
 }
 
+.panel-preview-typ {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0;
+}
+
 .preview-toolbar {
   display: flex;
   gap: 6px;
@@ -423,14 +430,74 @@ button, input, textarea, select {
 
 .hljs { color: inherit; }
 
-.typ-body svg {
-  display: block;
-  margin: 0 auto;
-  height: auto;
-  max-width: 100%;
+.typ-preview {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.typ-preview .typ-error {
+  flex-shrink: 0;
+  margin: 8px 12px 0;
+}
+
+.editor-pdf {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+}
+
+.pdf-viewer {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel-2);
+}
+
+.pdf-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.pdf-zoom-label {
+  min-width: 3.2em;
+  text-align: center;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.pdf-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 12px;
+}
+
+.pdf-scroll .react-pdf__Document {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+.pdf-scroll .react-pdf__Page {
   background: #fff;
-  border-radius: 4px;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+  border-radius: 2px;
+}
+
+.pdf-scroll .react-pdf__Page canvas {
+  display: block;
+  max-width: 100%;
+  height: auto;
 }
 
 .panel-chat {

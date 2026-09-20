@@ -24,8 +24,7 @@ const glue = '@myriaddreamin/typst.ts'
 const glueVersion = versionOf(glue)
 
 const sources = [
-  ['@myriaddreamin/typst-ts-web-compiler', 'pkg/typst_ts_web_compiler_bg.wasm', 'typst_ts_web_compiler_bg.wasm'],
-  ['@myriaddreamin/typst-ts-renderer', 'pkg/typst_ts_renderer_bg.wasm', 'typst_ts_renderer_bg.wasm']
+  ['@myriaddreamin/typst-ts-web-compiler', 'pkg/typst_ts_web_compiler_bg.wasm', 'typst_ts_web_compiler_bg.wasm']
 ]
 
 let failed = false

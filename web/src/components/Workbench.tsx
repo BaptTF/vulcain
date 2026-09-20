@@ -90,8 +90,8 @@ function EditorDock(_props: IDockviewPanelProps) {
 }
 
 function PreviewDock(_props: IDockviewPanelProps) {
-  const { live } = useWorkbench()
-  return <PreviewPane path={live.path} content={live.text} />
+  const { ws, live } = useWorkbench()
+  return <PreviewPane ws={ws} path={live.path} content={live.text} />
 }
 
 function AgentDock(_props: IDockviewPanelProps) {

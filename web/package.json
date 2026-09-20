@@ -22,7 +22,6 @@
     "@codemirror/state": "^6.5.2",
     "@codemirror/view": "^6.36.1",
     "@lezer/highlight": "^1.2.1",
-    "@myriaddreamin/typst-ts-renderer": "0.8.0-rc3",
     "@myriaddreamin/typst-ts-web-compiler": "0.8.0-rc3",
     "@myriaddreamin/typst.ts": "0.8.0-rc3",
     "@radix-ui/react-context-menu": "^2.3.7",
@@ -37,6 +36,7 @@
     "react-arborist": "^3.4.0",
     "react-dom": "^18.3.1",
     "react-dropzone": "^14.2.3",
+    "react-pdf": "^10.5.0",
     "sonner": "^2.0.8"
   },
   "devDependencies": {

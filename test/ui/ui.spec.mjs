@@ -395,30 +395,79 @@ await paneToggle('Agent').click()
 await page.waitForTimeout(300)
 check('agent expandable after reload', await boxVisible('.panel-chat'))
 
-// --- typst preview page fidelity (SVG rescaled to container width) ---
+// --- typst preview compiles a sibling PDF and renders it with react-pdf ---
 await putFile('page.typ', '#set page(width: 10cm, height: 15cm)\n#align(center)[Typst Page]\n')
 await page.waitForTimeout(800)
 const typRow = page.locator('[role="treeitem"]', { hasText: 'page.typ' }).first()
 await typRow.click()
-let typFound = false
-for (let i = 0; i < 24; i++) {
-  await page.waitForTimeout(500) // typst WASM compile + render
-  if (await page.locator('.typ-body svg').count()) {
-    typFound = true
+const previewPdf = page.locator('.panel-preview [data-testid="pdf-viewer"]')
+const pdfText = async () =>
+  (await previewPdf.locator('.react-pdf__Page__textContent').allTextContents()).join(' ')
+const waitForPdf = async marker => {
+  for (let i = 0; i < 30; i++) {
+    await page.waitForTimeout(500) // typst WASM compile + react-pdf render
+    if ((await previewPdf.locator('canvas').count()) && (await pdfText()).includes(marker)) return true
+  }
+  return false
+}
+const typFound = await waitForPdf('Typst Page')
+check('typst preview renders a pdf page', typFound)
+if (typFound) {
+  const cw = await previewPdf.locator('.pdf-scroll').evaluate(el => el.clientWidth)
+  const canvasBox = await previewPdf.locator('canvas').first().boundingBox()
+  check('typst pdf page has positive size', !!canvasBox && canvasBox.width > 0 && canvasBox.height > 0)
+  check('typst pdf page fits the preview width', !!canvasBox && canvasBox.width > 0 && canvasBox.width <= cw)
+} else {
+  check('typst pdf page has positive size', false)
+  check('typst pdf page fits the preview width', false)
+}
+const siblingPdf = await page.evaluate(async () => {
+  const ws = localStorage.getItem('vulcain.ws') || ''
+  const r = await fetch(`/api/fs/file?ws=${encodeURIComponent(ws)}&path=page.pdf`)
+  if (!r.ok) return { ok: false, header: '' }
+  const buf = new Uint8Array(await r.arrayBuffer())
+  return { ok: true, header: new TextDecoder().decode(buf.slice(0, 4)) }
+})
+check('typst watch writes a sibling page.pdf', siblingPdf.ok && siblingPdf.header === '%PDF')
+check('file tree lists the sibling pdf', await page.locator('[role="treeitem"]', { hasText: 'page.pdf' }).first().isVisible())
+
+await page.locator('.cm-content').click()
+await page.keyboard.press('Control+End')
+await page.keyboard.type('\nWATCH_PDF_MARKER')
+check('typst watch refreshes the pdf after an edit', await waitForPdf('WATCH_PDF_MARKER'))
+
+await putFile('bad.typ', '#definitely_not_a_function[oops]\n')
+await page.waitForTimeout(600)
+await page.locator('[role="treeitem"]', { hasText: 'bad.typ' }).first().click()
+let typErr = false
+for (let i = 0; i < 20; i++) {
+  await page.waitForTimeout(400)
+  if (await page.locator('.panel-preview .typ-error').count()) {
+    typErr = true
     break
   }
 }
-const typSvg = page.locator('.typ-body svg').first()
-if (typFound) {
-  const cw = await page.locator('.typ-body').evaluate(el => el.clientWidth)
-  const svgW = parseFloat((await typSvg.getAttribute('width')) ?? '0')
-  const svgH = parseFloat((await typSvg.getAttribute('height')) ?? '0')
-  check('typst svg rescaled to container width', svgW > 0 && Math.abs(svgW - cw) < 2)
-  check('typst svg keeps positive aspect', svgH > 0)
-} else {
-  check('typst svg rescaled to container width', false)
-  check('typst svg keeps aspect ratio', false)
+check('typst compile error is shown in the preview', typErr)
+const pagePdfStillThere = await page.evaluate(async () => {
+  const ws = localStorage.getItem('vulcain.ws') || ''
+  const r = await fetch(`/api/fs/file?ws=${encodeURIComponent(ws)}&path=page.pdf`)
+  if (!r.ok) return false
+  const buf = new Uint8Array(await r.arrayBuffer())
+  return new TextDecoder().decode(buf.slice(0, 4)) === '%PDF'
+})
+check('failed compile does not delete the last good sibling pdf', pagePdfStillThere)
+
+await page.locator('[role="treeitem"]', { hasText: 'page.pdf' }).first().click()
+let editorPdf = false
+for (let i = 0; i < 16; i++) {
+  await page.waitForTimeout(250)
+  if (await page.locator('.editor-pdf [data-testid="pdf-viewer"] canvas').count()) {
+    editorPdf = true
+    break
+  }
 }
+check('opening the sibling pdf uses the pdf viewer', editorPdf)
+
 // bring welcome.md back for the chat section below
 await page.locator('[role="treeitem"]', { hasText: 'welcome.md' }).first().click()
 await page.waitForTimeout(300)
