@@ -32,6 +32,7 @@ check('no uncaught page error', pageErrors.length === 0)
 if (pageErrors.length) console.log('  ->', pageErrors[0])
 
 check('app rendered (topbar)', await page.locator('.topbar .logo').isVisible())
+check('dockview workbench mounted', await page.locator('.dv-dockview').first().isVisible())
 check('chat panel rendered', await page.locator('.panel-chat .chat-header').isVisible())
 
 const row = page.locator('[role="treeitem"]', { hasText: 'welcome.md' })
@@ -39,7 +40,39 @@ check('file tree lists welcome.md', await row.first().isVisible())
 
 await row.first().click()
 await page.waitForTimeout(800)
-check('editor opens on click', await page.locator('.cm-editor').first().isVisible())
+const editorVisible = await page.locator('.cm-editor').first().isVisible()
+if (!editorVisible) {
+  const dump = await page.evaluate(() => {
+    const pick = sel => {
+      const n = document.querySelector(sel)
+      if (!n) return { sel, missing: true }
+      const r = n.getBoundingClientRect()
+      const s = getComputedStyle(n)
+      return {
+        sel,
+        w: Math.round(r.width),
+        h: Math.round(r.height),
+        t: Math.round(r.top),
+        l: Math.round(r.left),
+        display: s.display,
+        pos: s.position
+      }
+    }
+    return [
+      '.app',
+      '.main-panels',
+      '.vulcain-dock',
+      '.dv-dockview',
+      '[data-testid="editor"]',
+      '.panel-center',
+      '.editor-area',
+      '.cm-editor',
+      '.cm-content'
+    ].map(pick)
+  })
+  console.log('  -> editor box dump', JSON.stringify(dump))
+}
+check('editor opens on click', editorVisible)
 check(
   'editor shows file content',
   (await page.locator('.cm-content').first().textContent())?.includes('Bienvenue dans Vulcain') === true
@@ -193,7 +226,7 @@ await row.first().click()
 await page.waitForTimeout(300)
 
 // --- autosave: typing should persist to disk after the debounce ---
-await page.locator('.cm-content').first().click()
+await page.locator('[data-testid="editor"] .cm-content').first().click()
 await page.keyboard.type(' AUTOSAVE_MARKER')
 await page.waitForTimeout(1600) // > AUTOSAVE_DELAY (1s) + latency
 const diskContent = await page.evaluate(async () => {
@@ -315,14 +348,14 @@ await paneToggle('Editor').click()
 await page.waitForTimeout(300)
 check('editor can be collapsed with no main pane left', await paneToggle('Editor').evaluate(el => !el.classList.contains('active')))
 check('editor hidden when toggled off', await panelHidden('editor'))
-check('center hidden when editor+preview are off', await panelHidden('center'))
+check('editor and preview hidden when both off', (await panelHidden('editor')) && (await panelHidden('preview')))
 // even the tree can be collapsed when nothing else is open
 await paneToggle('Tree').click()
 await page.waitForTimeout(300)
 check('tree can be collapsed with all main panes off', await paneToggle('Tree').evaluate(el => !el.classList.contains('active')))
 check(
   'nothing visible when all panes collapsed',
-  (await panelHidden('tree')) && (await panelHidden('center')) && (await panelHidden('agent'))
+  (await panelHidden('tree')) && (await panelHidden('editor')) && (await panelHidden('agent'))
 )
 // restore all panes
 await paneToggle('Tree').click()
@@ -338,15 +371,19 @@ check(
     (await boxVisible('.panel-center'))
 )
 
-// --- tree hide/show must not refetch: <FileTree> stays mounted (like the agent) ---
-await page.waitForTimeout(500) // let any pending watch debounce settle
-const treeFetchesBefore = treeFetches
+// --- dockview: close via the tab X, reopen from the viewbar ---
+await page.waitForTimeout(500)
+const dockTab = title => page.locator('.dv-tab', { hasText: title }).first()
+check('dockview workbench is mounted', await page.locator('.dv-dockview').first().isVisible())
+check('tree tab exposes a close button', await dockTab('Tree').locator('.dv-default-tab-action').first().isVisible())
+await dockTab('Tree').locator('.dv-default-tab-action').first().click()
+await page.waitForTimeout(400)
+check('tree panel closes from the tab close button', await panelHidden('tree'))
+check('tree toggle reflects closed state', await paneToggle('Tree').evaluate(el => !el.classList.contains('active')))
 await paneToggle('Tree').click()
-await page.waitForTimeout(300)
-await paneToggle('Tree').click()
-await page.waitForTimeout(300)
-check('tree hide/show does not refetch the file tree', treeFetches === treeFetchesBefore)
-check('tree reappears instantly after toggle', await boxVisible('.panel-tree'))
+await page.waitForTimeout(400)
+check('tree reappears from the viewbar', await boxVisible('.panel-tree'))
+check('reopened tree still lists welcome.md', await page.locator('[role="treeitem"]', { hasText: 'welcome.md' }).first().isVisible())
 
 // --- layout persists across reload ---
 await paneToggle('Agent').click()

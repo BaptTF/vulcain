@@ -1,4 +1,4 @@
-import { forwardRef, useState, type ReactNode } from 'react'
+import { createContext, forwardRef, useContext, useState, type ReactNode } from 'react'
 import {
   ActionBarPrimitive,
   ComposerPrimitive,
@@ -46,20 +46,18 @@ export function AuiThread({ onOpenFile }: { onOpenFile: (path: string) => void }
   return (
     <ThreadPrimitive.Root className="aui-thread">
       <ThreadPrimitive.Viewport turnAnchor="top" className="aui-viewport">
-        <div className="aui-thread-scroll">
-          <div className="aui-messages">
-            <ThreadPrimitive.Messages>{() => <AuiMessage onOpenFile={onOpenFile} />}</ThreadPrimitive.Messages>
-          </div>
-          <div className="aui-thread-footer">
-            <AuiComposer />
-            <ThreadPrimitive.ScrollToBottom asChild>
-              <button className="aui-scroll-bottom" type="button" aria-label="Descendre en bas">
-                ↓
-              </button>
-            </ThreadPrimitive.ScrollToBottom>
-          </div>
+        <div className="aui-messages">
+          <ThreadPrimitive.Messages>{() => <AuiMessage onOpenFile={onOpenFile} />}</ThreadPrimitive.Messages>
         </div>
       </ThreadPrimitive.Viewport>
+      <div className="aui-thread-footer">
+        <AuiComposer />
+        <ThreadPrimitive.ScrollToBottom asChild>
+          <button className="aui-scroll-bottom" type="button" aria-label="Descendre en bas">
+            ↓
+          </button>
+        </ThreadPrimitive.ScrollToBottom>
+      </div>
     </ThreadPrimitive.Root>
   )
 }
@@ -264,24 +262,30 @@ function AuiComposer(): ReactNode {
   )
 }
 
+const SessionsPanelContext = createContext<(() => void) | undefined>(undefined)
+const SESSION_ITEM_COMPONENTS = { ThreadListItem: AuiSessionItem }
+
 export const AuiSessionsPanel = forwardRef<HTMLDivElement, { onSelect?: () => void }>(
   function AuiSessionsPanel({ onSelect }, ref): ReactNode {
     return (
-      <div className="aui-sessions" ref={ref}>
-        <ThreadListPrimitive.Root className="aui-sessions-list">
-          <ThreadListPrimitive.Items components={{ ThreadListItem: () => <AuiSessionItem onSelect={onSelect} /> }} />
-          <ThreadListPrimitive.New asChild>
-            <button type="button" className="btn" onClick={() => onSelect?.()}>
-              Nouvelle session
-            </button>
-          </ThreadListPrimitive.New>
-        </ThreadListPrimitive.Root>
-      </div>
+      <SessionsPanelContext.Provider value={onSelect}>
+        <div className="aui-sessions" ref={ref}>
+          <ThreadListPrimitive.Root className="aui-sessions-list">
+            <ThreadListPrimitive.Items components={SESSION_ITEM_COMPONENTS} />
+            <ThreadListPrimitive.New asChild>
+              <button type="button" className="btn" onClick={() => onSelect?.()}>
+                Nouvelle session
+              </button>
+            </ThreadListPrimitive.New>
+          </ThreadListPrimitive.Root>
+        </div>
+      </SessionsPanelContext.Provider>
     )
   }
 )
 
-function AuiSessionItem({ onSelect }: { onSelect?: () => void }): ReactNode {
+function AuiSessionItem(): ReactNode {
+  const onSelect = useContext(SessionsPanelContext)
   return (
     <ThreadListItemPrimitive.Root className="aui-session-item">
       <ThreadListItemPrimitive.Trigger asChild>

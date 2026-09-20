@@ -35,7 +35,6 @@ function ChatHeader({
 
   return (
     <div className="chat-header">
-      Agent
       <span className={`chat-status ${status}`}>{statusLabel}</span>
       <AuiUsageBar />
       <div className="spacer" />
@@ -122,7 +121,7 @@ export default function Chat({ ws, onOpenFile }: Props): React.ReactNode {
 
   return (
     <AssistantRuntimeProvider runtime={runtime}>
-      <div className="panel-chat">
+      <div className="panel-chat" data-testid="agent-chat">
         <ChatHeader
           sessionsOpen={sessionsOpen}
           onToggleSessions={() => setSessionsOpen(o => !o)}

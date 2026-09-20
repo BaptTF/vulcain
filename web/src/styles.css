@@ -153,14 +153,67 @@ button, input, textarea, select {
 .main-panels {
   flex: 1;
   min-height: 0;
+  min-width: 0;
+  position: relative;
 }
 
-.main-panels.agent-hidden [data-testid="agent"] {
-  display: none !important;
+.vulcain-dock {
+  position: absolute;
+  inset: 0;
 }
 
-.main-panels.tree-hidden [data-testid="tree"] {
-  display: none !important;
+/* Dockview only measures correctly when it has a definite box. */
+.vulcain-dock .dv-dockview,
+.vulcain-dock .dv-root-wrapper {
+  height: 100%;
+  width: 100%;
+}
+
+.vulcain-dock .dv-content-container > * {
+  height: 100%;
+  min-height: 0;
+}
+
+/* Keep scroll inside panels; dockview views default to overflow:auto and steal it. */
+.vulcain-dock .dv-view {
+  overflow: hidden;
+}
+
+.dockview-theme-vulcain {
+  --dv-background-color: var(--bg);
+  --dv-group-view-background-color: var(--panel);
+  --dv-tabs-and-actions-container-background-color: var(--panel);
+  --dv-tabs-and-actions-container-height: 32px;
+  --dv-tabs-and-actions-container-font-size: 12px;
+  --dv-activegroup-visiblepanel-tab-background-color: var(--bg);
+  --dv-activegroup-visiblepanel-tab-color: var(--text);
+  --dv-activegroup-hiddenpanel-tab-background-color: var(--panel);
+  --dv-activegroup-hiddenpanel-tab-color: var(--muted);
+  --dv-inactivegroup-visiblepanel-tab-background-color: var(--panel-2);
+  --dv-inactivegroup-visiblepanel-tab-color: var(--text);
+  --dv-inactivegroup-hiddenpanel-tab-background-color: var(--panel);
+  --dv-inactivegroup-hiddenpanel-tab-color: var(--muted);
+  --dv-tab-divider-color: var(--border);
+  --dv-separator-border: var(--border);
+  --dv-paneview-header-border-color: var(--border);
+  --dv-icon-hover-background-color: var(--accent-soft);
+  --dv-active-sash-color: var(--accent);
+  --dv-drag-over-background-color: var(--accent-soft);
+  --dv-drag-over-border-color: var(--accent);
+  --dv-floating-box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+
+.dockview-theme-vulcain .dv-default-tab-action {
+  visibility: visible;
+  opacity: 1;
+}
+
+.panel-chat-host,
+.panel-tree,
+.panel-preview,
+.panel-chat {
+  height: 100%;
+  min-height: 0;
 }
 
 .panel-tree {
@@ -230,6 +283,7 @@ button, input, textarea, select {
 
 .panel-center {
   height: 100%;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   background: var(--bg);
@@ -274,11 +328,14 @@ button, input, textarea, select {
 .editor-area {
   flex: 1;
   min-height: 0;
+  min-width: 0;
   display: flex;
   overflow: hidden;
 }
 
 .editor-half {
+  flex: 1;
+  width: 100%;
   height: 100%;
   min-width: 0;
   position: relative;
@@ -289,7 +346,10 @@ button, input, textarea, select {
   inset: 0;
 }
 
-.cm-editor { height: 100%; }
+.cm-editor {
+  height: 100%;
+  width: 100%;
+}
 .cm-editor .cm-scroller {
   font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 13.5px;
@@ -307,7 +367,6 @@ button, input, textarea, select {
 .panel-preview {
   height: 100%;
   min-width: 0;
-  border-left: 1px solid var(--border);
   background: var(--panel);
   overflow-y: auto;
   padding: 24px 32px;
@@ -380,7 +439,6 @@ button, input, textarea, select {
   display: flex;
   flex-direction: column;
   background: var(--panel);
-  border-left: 1px solid var(--border);
   overflow: hidden;
 }
 
@@ -794,12 +852,8 @@ button, input, textarea, select {
   flex-direction: column;
 }
 
-.aui-thread-scroll {
-  flex: 1;
-  min-height: 100%;
-  display: flex;
-  flex-direction: column;
-  padding: 12px;
+.aui-viewport .aui-messages {
+  padding: 12px 12px 0;
 }
 
 .aui-messages {
@@ -809,9 +863,10 @@ button, input, textarea, select {
 }
 
 .aui-thread-footer {
-  margin-top: auto;
-  padding-top: 12px;
+  flex-shrink: 0;
+  padding: 12px;
   position: relative;
+  z-index: 2;
 }
 
 .aui-msg {
@@ -1082,7 +1137,7 @@ button, input, textarea, select {
   font-size: 15px;
   cursor: pointer;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
-  z-index: 5;
+  z-index: 6;
 }
 
 .aui-scroll-bottom:hover {

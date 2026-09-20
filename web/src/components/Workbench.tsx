@@ -1,0 +1,330 @@
+import {
+  createContext,
+  forwardRef,
+  useCallback,
+  useContext,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+  type MutableRefObject
+} from 'react'
+import {
+  DockviewReact,
+  themeDark,
+  themeLight,
+  type DockviewApi,
+  type DockviewReadyEvent,
+  type IDockviewPanelProps
+} from 'dockview-react'
+import FileTree from './FileTree'
+import EditorPane, { PreviewPane, type Tab } from './EditorPane'
+import Chat from './Chat'
+
+export type PaneId = 'tree' | 'editor' | 'preview' | 'agent'
+
+export const PANE_IDS: PaneId[] = ['tree', 'editor', 'preview', 'agent']
+
+const LAYOUT_KEY = 'vulcain.dock'
+
+const PANE_TITLE: Record<PaneId, string> = {
+  tree: 'Tree',
+  editor: 'Editor',
+  preview: 'Preview',
+  agent: 'Agent'
+}
+
+export interface WorkbenchHandle {
+  togglePane: (id: PaneId) => void
+}
+
+interface LiveDoc {
+  path: string | null
+  text: string
+}
+
+interface WorkbenchValue {
+  ws: string
+  tabs: Tab[]
+  activePath: string | null
+  onActivate: (path: string) => void
+  onClose: (path: string) => void
+  onOpen: (path: string) => void
+  flushRef: MutableRefObject<(() => void) | null>
+  live: LiveDoc
+  setLive: (doc: LiveDoc) => void
+}
+
+const WorkbenchContext = createContext<WorkbenchValue | null>(null)
+
+function useWorkbench(): WorkbenchValue {
+  const ctx = useContext(WorkbenchContext)
+  if (!ctx) throw new Error('WorkbenchContext missing')
+  return ctx
+}
+
+function TreeDock(_props: IDockviewPanelProps) {
+  const { ws, onOpen } = useWorkbench()
+  return (
+    <div className="panel-tree" data-testid="tree">
+      <FileTree ws={ws} onOpen={onOpen} />
+    </div>
+  )
+}
+
+function EditorDock(_props: IDockviewPanelProps) {
+  const { ws, tabs, activePath, onActivate, onClose, flushRef, setLive } = useWorkbench()
+  return (
+    <div className="panel-center" data-testid="editor">
+      <EditorPane
+        ws={ws}
+        tabs={tabs}
+        activePath={activePath}
+        onActivate={onActivate}
+        onClose={onClose}
+        flushRef={flushRef}
+        onLiveChange={(path, text) => setLive({ path, text })}
+      />
+    </div>
+  )
+}
+
+function PreviewDock(_props: IDockviewPanelProps) {
+  const { live } = useWorkbench()
+  return <PreviewPane path={live.path} content={live.text} />
+}
+
+function AgentDock(_props: IDockviewPanelProps) {
+  const { ws, onOpen } = useWorkbench()
+  return (
+    <div className="panel-chat-host" data-testid="agent">
+      <Chat key={ws} ws={ws} onOpenFile={onOpen} />
+    </div>
+  )
+}
+
+const dockComponents = {
+  tree: TreeDock,
+  editor: EditorDock,
+  preview: PreviewDock,
+  agent: AgentDock
+}
+
+function Watermark() {
+  return <div className="empty-state">Réouvrez un panneau depuis la barre du haut</div>
+}
+
+function panesFromApi(api: DockviewApi): Record<PaneId, boolean> {
+  const open = new Set(api.panels.map(p => p.id))
+  return {
+    tree: open.has('tree'),
+    editor: open.has('editor'),
+    preview: open.has('preview'),
+    agent: open.has('agent')
+  }
+}
+
+function persistLayout(api: DockviewApi): void {
+  if (api.width < 8 || api.height < 8) return
+  try {
+    localStorage.setItem(LAYOUT_KEY, JSON.stringify(api.toJSON()))
+  } catch {}
+}
+
+function addPane(api: DockviewApi, id: PaneId): void {
+  if (api.getPanel(id)) return
+  api.addPanel({
+    id,
+    component: id,
+    title: PANE_TITLE[id],
+    minimumWidth: id === 'tree' ? 140 : 180,
+    position: defaultPosition(api, id)
+  })
+}
+
+function defaultPosition(api: DockviewApi, id: PaneId) {
+  if (id === 'tree') return { direction: 'left' as const }
+  if (id === 'agent') return { direction: 'right' as const }
+  if (id === 'preview') {
+    if (api.getPanel('editor')) return { referencePanel: 'editor', direction: 'below' as const }
+    if (api.getPanel('agent')) return { referencePanel: 'agent', direction: 'left' as const }
+    if (api.getPanel('tree')) return { referencePanel: 'tree', direction: 'right' as const }
+    return { direction: 'right' as const }
+  }
+  if (id === 'editor') {
+    if (api.getPanel('preview')) return { referencePanel: 'preview', direction: 'above' as const }
+    if (api.getPanel('agent')) return { referencePanel: 'agent', direction: 'left' as const }
+    if (api.getPanel('tree')) return { referencePanel: 'tree', direction: 'right' as const }
+    return { direction: 'right' as const }
+  }
+  return { direction: 'right' as const }
+}
+
+function applyDefaultLayout(api: DockviewApi, visible: Record<PaneId, boolean>): void {
+  if (visible.tree) {
+    api.addPanel({ id: 'tree', component: 'tree', title: PANE_TITLE.tree, initialWidth: 240 })
+  }
+  if (visible.editor) {
+    api.addPanel({
+      id: 'editor',
+      component: 'editor',
+      title: PANE_TITLE.editor,
+      minimumWidth: 180,
+      minimumHeight: 120,
+      position: visible.tree ? { referencePanel: 'tree', direction: 'right' } : undefined
+    })
+  }
+  // Split the editor column first so preview height cannot be applied as a column width.
+  if (visible.preview) {
+    const ref = visible.editor ? 'editor' : visible.tree ? 'tree' : undefined
+    api.addPanel({
+      id: 'preview',
+      component: 'preview',
+      title: PANE_TITLE.preview,
+      position: ref
+        ? { referencePanel: ref, direction: visible.editor ? 'below' : 'right' }
+        : undefined
+    })
+  }
+  if (visible.agent) {
+    const ref = visible.editor ? 'editor' : visible.preview ? 'preview' : visible.tree ? 'tree' : undefined
+    api.addPanel({
+      id: 'agent',
+      component: 'agent',
+      title: PANE_TITLE.agent,
+      initialWidth: 360,
+      position: ref ? { referencePanel: ref, direction: 'right' } : undefined
+    })
+  }
+  api.getPanel('editor')?.api.setActive()
+}
+
+function restoreLayout(api: DockviewApi, fallback: Record<PaneId, boolean>): void {
+  try {
+    const raw = localStorage.getItem(LAYOUT_KEY)
+    if (raw) {
+      const parsed = JSON.parse(raw)
+      if (
+        parsed &&
+        typeof parsed === 'object' &&
+        parsed.grid &&
+        parsed.panels &&
+        parsed.grid.width >= 8 &&
+        parsed.grid.height >= 8
+      ) {
+        api.fromJSON(parsed)
+        return
+      }
+    }
+  } catch {}
+  applyDefaultLayout(api, fallback)
+}
+
+interface Props {
+  ws: string
+  theme: 'dark' | 'light'
+  panes: Record<PaneId, boolean>
+  onPanesChange: (panes: Record<PaneId, boolean>) => void
+  tabs: Tab[]
+  activePath: string | null
+  onActivate: (path: string) => void
+  onClose: (path: string) => void
+  onOpen: (path: string) => void
+  flushRef: MutableRefObject<(() => void) | null>
+}
+
+const Workbench = forwardRef<WorkbenchHandle, Props>(function Workbench(
+  { ws, theme, panes, onPanesChange, tabs, activePath, onActivate, onClose, onOpen, flushRef },
+  ref
+) {
+  const apiRef = useRef<DockviewApi | null>(null)
+  const hostRef = useRef<HTMLDivElement>(null)
+  const persistTimer = useRef(0)
+  const [live, setLive] = useState<LiveDoc>({ path: null, text: '' })
+  const initialPanes = useRef(panes)
+
+  const fitLayout = useCallback((api: DockviewApi) => {
+    const el = hostRef.current
+    if (!el) return
+    const { width, height } = el.getBoundingClientRect()
+    if (width < 8 || height < 8) return
+    if (api.width !== Math.round(width) || api.height !== Math.round(height)) {
+      api.layout(width, height)
+    }
+  }, [])
+
+  const value = useMemo<WorkbenchValue>(
+    () => ({
+      ws,
+      tabs,
+      activePath,
+      onActivate,
+      onClose,
+      onOpen,
+      flushRef,
+      live,
+      setLive
+    }),
+    [ws, tabs, activePath, onActivate, onClose, onOpen, flushRef, live]
+  )
+
+  const syncPanes = useCallback(
+    (api: DockviewApi) => {
+      onPanesChange(panesFromApi(api))
+    },
+    [onPanesChange]
+  )
+
+  useImperativeHandle(ref, () => ({
+    togglePane(id: PaneId) {
+      const api = apiRef.current
+      if (!api) return
+      const panel = api.getPanel(id)
+      if (panel) panel.api.close()
+      else addPane(api, id)
+    }
+  }))
+
+  const onReady = useCallback(
+    (event: DockviewReadyEvent) => {
+      const api = event.api
+      apiRef.current = api
+      restoreLayout(api, initialPanes.current)
+      syncPanes(api)
+      api.getPanel('editor')?.api.setActive()
+      requestAnimationFrame(() => fitLayout(api))
+      api.onDidLayoutChange(() => {
+        window.clearTimeout(persistTimer.current)
+        persistTimer.current = window.setTimeout(() => persistLayout(api), 200)
+      })
+      api.onDidAddPanel(() => syncPanes(api))
+      api.onDidRemovePanel(() => syncPanes(api))
+    },
+    [fitLayout, syncPanes]
+  )
+
+  const dockTheme = useMemo(() => {
+    const base = theme === 'light' ? themeLight : themeDark
+    return {
+      ...base,
+      name: 'vulcain',
+      className: `${base.className} dockview-theme-vulcain`
+    }
+  }, [theme])
+
+  return (
+    <WorkbenchContext.Provider value={value}>
+      <div className="vulcain-dock" ref={hostRef}>
+        <DockviewReact
+          theme={dockTheme}
+          components={dockComponents}
+          watermarkComponent={Watermark}
+          getTabContextMenuItems={() => ['close', 'closeOthers', 'closeAll', 'maximize']}
+          onReady={onReady}
+        />
+      </div>
+    </WorkbenchContext.Provider>
+  )
+})
+
+export default Workbench

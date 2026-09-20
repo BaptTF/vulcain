@@ -1,14 +1,10 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { Group, Panel, Separator, useDefaultLayout, usePanelRef } from 'react-resizable-panels'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Toaster } from 'sonner'
 import { getMeta, setTheme, type Meta } from './api'
-import FileTree from './components/FileTree'
-import EditorPane, { type Tab } from './components/EditorPane'
-import Chat from './components/Chat'
+import { type Tab } from './components/EditorPane'
 import WorkspaceModal from './components/WorkspaceModal'
 import WorkspaceSwitcher from './components/WorkspaceSwitcher'
-
-type PaneId = 'tree' | 'editor' | 'preview' | 'agent'
+import Workbench, { PANE_IDS, type PaneId, type WorkbenchHandle } from './components/Workbench'
 
 type SavedTabs = { tabs: string[]; active: string | null }
 
@@ -60,6 +56,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<string | null>(() => readSavedTabs(storedWorkspace()).active)
   const [wsModalOpen, setWsModalOpen] = useState(false)
   const flushRef = useRef<(() => void) | null>(null)
+  const workbenchRef = useRef<WorkbenchHandle>(null)
 
   const [panes, setPanes] = useState<Record<PaneId, boolean>>(() => {
     try {
@@ -75,43 +72,8 @@ export default function App() {
   })
 
   const togglePane = useCallback((id: PaneId) => {
-    setPanes(prev => ({ ...prev, [id]: !prev[id] }))
+    workbenchRef.current?.togglePane(id)
   }, [])
-
-  const agentPanelRef = usePanelRef()
-  const lastAgentSize = useRef(28)
-  const treePanelRef = usePanelRef()
-  const lastTreeSize = useRef(20)
-
-  const centerVisible = panes.editor || panes.preview
-  const outerPanelIds = ['tree', ...(centerVisible ? ['center'] : []), 'agent']
-
-  useLayoutEffect(() => {
-    const ref = agentPanelRef.current
-    if (!ref) return
-    if (panes.agent) {
-      ref.resize(`${lastAgentSize.current}%`)
-    } else {
-      if (!ref.isCollapsed()) lastAgentSize.current = ref.getSize().asPercentage
-      ref.collapse()
-    }
-  }, [panes.agent])
-
-  useLayoutEffect(() => {
-    const ref = treePanelRef.current
-    if (!ref) return
-    if (panes.tree) {
-      ref.resize(`${lastTreeSize.current}%`)
-    } else {
-      if (!ref.isCollapsed()) lastTreeSize.current = ref.getSize().asPercentage
-      ref.collapse()
-    }
-  }, [panes.tree])
-
-  const { defaultLayout: outerLayout, onLayoutChanged: onOuterLayoutChanged } = useDefaultLayout({
-    id: 'vulcain.outer',
-    panelIds: outerPanelIds
-  })
 
   const applyWorkspace = useCallback((name: string, persistFrom?: { ws: string; tabs: Tab[]; active: string | null }) => {
     if (!name) return
@@ -204,7 +166,7 @@ export default function App() {
       </header>
 
       <div className="viewbar">
-        {(['tree', 'editor', 'preview', 'agent'] as PaneId[]).map(id => (
+        {PANE_IDS.map(id => (
           <button
             key={id}
             className={`pane-toggle${panes[id] ? ' active' : ''}`}
@@ -216,75 +178,20 @@ export default function App() {
         ))}
       </div>
 
-      <div className={`main-panels${panes.tree ? '' : ' tree-hidden'}${panes.agent ? '' : ' agent-hidden'}`}>
-        <Group
-          orientation="horizontal"
-          id="vulcain.outer"
-          defaultLayout={outerLayout}
-          onLayoutChanged={onOuterLayoutChanged}
-        >
-          <Panel
-            id="tree"
-            minSize="12"
-            defaultSize="20"
-            collapsible
-            collapsedSize={0}
-            panelRef={treePanelRef}
-            onResize={(_size, _id, prevSize) => {
-              if (!prevSize) return
-              const ref = treePanelRef.current
-              if (!ref) return
-              if (!panes.tree) {
-                if (!ref.isCollapsed()) ref.collapse()
-              } else if (ref.isCollapsed()) {
-                ref.expand()
-              }
-            }}
-          >
-            <div className="panel-tree">
-              <FileTree ws={activeWs} onOpen={openFile} />
-            </div>
-          </Panel>
-          {panes.tree && centerVisible && <Separator />}
-          {centerVisible && (
-            <Panel id="center" minSize="10">
-              <div className="panel-center">
-                <EditorPane
-                  key={activeWs}
-                  ws={activeWs}
-                  tabs={tabs}
-                  activePath={activeTab}
-                  onActivate={setActiveTab}
-                  onClose={closeTab}
-                  flushRef={flushRef}
-                  showEditor={panes.editor}
-                  showPreview={panes.preview}
-                />
-              </div>
-            </Panel>
-          )}
-          {centerVisible && panes.agent && <Separator />}
-          <Panel
-            id="agent"
-            minSize="16"
-            defaultSize="28"
-            collapsible
-            collapsedSize={0}
-            panelRef={agentPanelRef}
-            onResize={(_size, _id, prevSize) => {
-              if (!prevSize) return
-              const ref = agentPanelRef.current
-              if (!ref) return
-              if (!panes.agent) {
-                if (!ref.isCollapsed()) ref.collapse()
-              } else if (ref.isCollapsed()) {
-                ref.expand()
-              }
-            }}
-          >
-            <Chat key={activeWs} ws={activeWs} onOpenFile={openFile} />
-          </Panel>
-        </Group>
+      <div className="main-panels">
+        <Workbench
+          ref={workbenchRef}
+          ws={activeWs}
+          theme={meta?.theme ?? 'dark'}
+          panes={panes}
+          onPanesChange={setPanes}
+          tabs={tabs}
+          activePath={activeTab}
+          onActivate={setActiveTab}
+          onClose={closeTab}
+          onOpen={openFile}
+          flushRef={flushRef}
+        />
       </div>
       <WorkspaceModal
         open={wsModalOpen}

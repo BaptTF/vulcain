@@ -24,7 +24,6 @@ import { json } from '@codemirror/lang-json'
 import { tags as t } from '@lezer/highlight'
 import { indentWithTab } from '@codemirror/commands'
 import { toast } from 'sonner'
-import { Group, Panel, Separator, useDefaultLayout } from 'react-resizable-panels'
 import { subscribeWatch } from '../watch-client'
 import * as api from '../api'
 import { bytesToBase64, typstPdfBytes } from '../typst'
@@ -41,8 +40,7 @@ interface Props {
   onActivate: (path: string) => void
   onClose: (path: string) => void
   flushRef?: MutableRefObject<(() => void) | null>
-  showEditor?: boolean
-  showPreview?: boolean
+  onLiveChange?: (path: string | null, content: string) => void
 }
 
 const vulcainHighlight = HighlightStyle.define([
@@ -123,8 +121,7 @@ export default function EditorPane({
   onActivate,
   onClose,
   flushRef,
-  showEditor = true,
-  showPreview = true
+  onLiveChange
 }: Props) {
   const [contents, setContents] = useState<Record<string, string>>({})
   const [dirty, setDirty] = useState<Record<string, boolean>>({})
@@ -263,12 +260,10 @@ export default function EditorPane({
   const isMd = !!activePath && /\.md$/i.test(activePath)
   const isTyp = !!activePath && /\.typ$/i.test(activePath)
   const previewable = isMd || isTyp
-  const innerPanelIds = [showEditor ? 'editor' : null, showPreview && previewable ? 'preview' : null].filter(Boolean) as string[]
 
-  const { defaultLayout: centerLayout, onLayoutChanged: onCenterLayoutChanged } = useDefaultLayout({
-    id: 'vulcain.center',
-    panelIds: innerPanelIds
-  })
+  useEffect(() => {
+    onLiveChange?.(activePath, content)
+  }, [activePath, content, onLiveChange])
 
   const exportPdf = useCallback(async () => {
     if (!activePath || !content) return
@@ -331,39 +326,37 @@ export default function EditorPane({
         <iframe src={api.fileUrl(ws, activePath)} style={{ flex: 1, border: 'none' }} title={activePath} />
       ) : (
         <div className="editor-area">
-          <Group
-            orientation="horizontal"
-            id="vulcain.center"
-            defaultLayout={centerLayout}
-            onLayoutChanged={onCenterLayoutChanged}
-          >
-            {showEditor && (
-              <Panel id="editor" minSize="15" defaultSize="50">
-                <div className="editor-half">
-                  <div className="cm-editor-host">
-                    <CodeEditor
-                      key={`${ws}:${activePath}`}
-                      value={content}
-                      extensions={langExtensions(activePath)}
-                      onChange={v => handleChange(activePath, v)}
-                      onSave={save}
-                    />
-                  </div>
-                </div>
-              </Panel>
-            )}
-            {showEditor && showPreview && previewable && <Separator />}
-            {showPreview && previewable && (
-              <Panel id="preview" minSize="15" defaultSize="50">
-                <div className="panel-preview">
-                  {isMd ? <MarkdownView source={content} /> : <TypstView source={content} />}
-                </div>
-              </Panel>
-            )}
-          </Group>
+          <div className="editor-half">
+            <div className="cm-editor-host">
+              <CodeEditor
+                key={`${ws}:${activePath}`}
+                value={content}
+                extensions={langExtensions(activePath)}
+                onChange={v => handleChange(activePath, v)}
+                onSave={save}
+              />
+            </div>
+          </div>
         </div>
       )}
     </>
+  )
+}
+
+export function PreviewPane({ path, content }: { path: string | null; content: string }) {
+  const isMd = !!path && /\.md$/i.test(path)
+  const isTyp = !!path && /\.typ$/i.test(path)
+  if (!path || (!isMd && !isTyp)) {
+    return (
+      <div className="panel-preview" data-testid="preview">
+        <div className="empty-state">Ouvrez un fichier markdown ou Typst pour la preview</div>
+      </div>
+    )
+  }
+  return (
+    <div className="panel-preview" data-testid="preview">
+      {isMd ? <MarkdownView source={content} /> : <TypstView source={content} />}
+    </div>
   )
 }
 
