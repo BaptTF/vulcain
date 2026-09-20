@@ -10,7 +10,7 @@ const check = (name, cond) => {
 const threadText = async () => (await page.locator('.aui-markdown').allTextContents()).join('\n')
 
 const browser = await chromium.launch()
-const page = await browser.newPage()
+const page = await browser.newPage({ viewport: { width: 1440, height: 900 } })
 const consoleErrors = []
 const pageErrors = []
 let treeFetches = 0
@@ -21,6 +21,65 @@ page.on('console', m => {
   if (m.type() === 'error') consoleErrors.push(m.text())
 })
 page.on('pageerror', e => pageErrors.push(String(e?.message ?? e)))
+
+const paneBoxes = () =>
+  page.evaluate(() => {
+    const pick = id => {
+      const n = document.querySelector(`[data-testid="${id}"]`)
+      if (!n) return null
+      const r = n.getBoundingClientRect()
+      return { x: r.left, y: r.top, w: r.width, h: r.height, right: r.right, bottom: r.bottom }
+    }
+    return {
+      tree: pick('tree'),
+      editor: pick('editor'),
+      preview: pick('preview'),
+      agent: pick('agent')
+    }
+  })
+
+const sideBySide = boxes => {
+  const order = [boxes.tree, boxes.editor, boxes.preview, boxes.agent]
+  if (order.some(b => !b || b.w < 20 || b.h < 40)) return false
+  const topSpan = Math.max(...order.map(b => b.y)) - Math.min(...order.map(b => b.y))
+  return (
+    topSpan < 60 &&
+    order[0].x < order[1].x - 8 &&
+    order[1].x < order[2].x - 8 &&
+    order[2].x < order[3].x - 8
+  )
+}
+
+const previewStackedUnderEditor = boxes => {
+  const e = boxes.editor
+  const p = boxes.preview
+  if (!e || !p) return false
+  return p.y > e.y + e.h * 0.35 && Math.abs(p.x - e.x) < 80
+}
+
+const sashRightOf = id =>
+  page.evaluate(testId => {
+    const el = document.querySelector(`[data-testid="${testId}"]`)
+    if (!el) return null
+    const r = el.getBoundingClientRect()
+    const midY = r.top + r.height / 2
+    const sashes = [...document.querySelectorAll('.dv-sash.dv-enabled')]
+    let best = null
+    let bestDist = Infinity
+    for (let i = 0; i < sashes.length; i++) {
+      const s = sashes[i]
+      const sr = s.getBoundingClientRect()
+      if (sr.height < 40 || sr.height < sr.width * 2) continue
+      if (sr.bottom < midY || sr.top > midY) continue
+      const cx = sr.left + sr.width / 2
+      const dist = Math.abs(cx - r.right)
+      if (dist < bestDist) {
+        bestDist = dist
+        best = { i, x: cx, y: midY, dist, cls: s.className }
+      }
+    }
+    return best && best.dist < 24 ? best : null
+  }, id)
 
 await page.goto(BASE, { waitUntil: 'domcontentloaded' })
 await page.waitForTimeout(2500)
@@ -34,6 +93,91 @@ if (pageErrors.length) console.log('  ->', pageErrors[0])
 check('app rendered (topbar)', await page.locator('.topbar .logo').isVisible())
 check('dockview workbench mounted', await page.locator('.dv-dockview').first().isVisible())
 check('chat panel rendered', await page.locator('.panel-chat .chat-header').isVisible())
+
+// --- default workbench: tree | editor | preview | agent in one row ---
+const defaultBoxes = await paneBoxes()
+const defaultRow = sideBySide(defaultBoxes)
+if (!defaultRow) console.log('  -> default pane boxes', JSON.stringify(defaultBoxes))
+check('default layout is tree | editor | preview | agent side by side', defaultRow)
+check('preview is not stacked under the editor', !previewStackedUnderEditor(defaultBoxes))
+
+// --- resize: dragging the editor's right sash must stick (no snap-back) ---
+const beforeResize = await paneBoxes()
+const editorSash = await sashRightOf('editor')
+if (!editorSash) console.log('  -> no vertical sash on the editor right edge')
+check('editor has a vertical sash on its right edge', !!editorSash)
+let editorGrew = false
+let resizeStuck = false
+let stillRowAfterResize = false
+const topAtSash = editorSash
+  ? await page.evaluate(({ x, y }) => {
+      const n = document.elementFromPoint(x, y)
+      return n ? { tag: n.tagName, cls: n.className } : null
+    }, editorSash)
+  : null
+check(
+  'sash is on top at the editor right edge',
+  !!topAtSash?.cls?.includes('dv-sash')
+)
+if (editorSash && !topAtSash?.cls?.includes('dv-sash')) {
+  console.log('  -> elementFromPoint at sash', JSON.stringify(topAtSash))
+}
+if (editorSash) {
+  const startW = beforeResize.editor?.w ?? 0
+  // dockview sashes listen to pointerdown/move/up, not a CSS resize handle
+  await page.evaluate(({ i, dx }) => {
+    const sash = document.querySelectorAll('.dv-sash.dv-enabled')[i]
+    if (!sash) return
+    const r = sash.getBoundingClientRect()
+    const x = r.left + r.width / 2
+    const y = r.top + r.height / 2
+    const fire = (target, type, cx, buttons) =>
+      target.dispatchEvent(
+        new PointerEvent(type, {
+          bubbles: true,
+          cancelable: true,
+          view: window,
+          clientX: cx,
+          clientY: y,
+          pointerId: 1,
+          pointerType: 'mouse',
+          isPrimary: true,
+          buttons,
+          button: 0
+        })
+      )
+    fire(sash, 'pointerdown', x, 1)
+    fire(document, 'pointermove', x + dx / 2, 1)
+    fire(document, 'pointermove', x + dx, 1)
+    fire(document, 'pointerup', x + dx, 0)
+  }, { i: editorSash.i, dx: 80 })
+  await page.waitForTimeout(150)
+  const justAfter = await paneBoxes()
+  await page.waitForTimeout(500) // persist timer is 200ms; catch snap-back
+  const settled = await paneBoxes()
+  const grewJustAfter = (justAfter.editor?.w ?? 0) >= startW + 30
+  const stayedGrown = (settled.editor?.w ?? 0) >= startW + 30
+  const stable = Math.abs((settled.editor?.w ?? 0) - (justAfter.editor?.w ?? 0)) < 20
+  editorGrew = grewJustAfter
+  resizeStuck = grewJustAfter && stayedGrown && stable
+  stillRowAfterResize = sideBySide(settled)
+  if (!resizeStuck || !stillRowAfterResize) {
+    console.log(
+      '  -> resize',
+      JSON.stringify({
+        startW,
+        before: beforeResize,
+        justAfter,
+        settled,
+        sash: editorSash,
+        topAtSash
+      })
+    )
+  }
+}
+check('dragging editor right sash widens the editor', editorGrew)
+check('editor resize sticks (no snap-back)', resizeStuck)
+check('layout stays side by side after editor resize', stillRowAfterResize)
 
 const row = page.locator('[role="treeitem"]', { hasText: 'welcome.md' })
 check('file tree lists welcome.md', await row.first().isVisible())
@@ -370,6 +514,11 @@ check(
     (await boxVisible('.cm-editor')) &&
     (await boxVisible('.panel-center'))
 )
+const restoredBoxes = await paneBoxes()
+const restoredRow = sideBySide(restoredBoxes)
+if (!restoredRow) console.log('  -> restored pane boxes', JSON.stringify(restoredBoxes))
+check('restored layout is still tree | editor | preview | agent side by side', restoredRow)
+check('restored preview is not stacked under the editor', !previewStackedUnderEditor(restoredBoxes))
 
 // --- dockview: close via the tab X, reopen from the viewbar ---
 await page.waitForTimeout(500)

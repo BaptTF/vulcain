@@ -3,6 +3,7 @@ import {
   forwardRef,
   useCallback,
   useContext,
+  useEffect,
   useImperativeHandle,
   useMemo,
   useRef,
@@ -25,7 +26,7 @@ export type PaneId = 'tree' | 'editor' | 'preview' | 'agent'
 
 export const PANE_IDS: PaneId[] = ['tree', 'editor', 'preview', 'agent']
 
-const LAYOUT_KEY = 'vulcain.dock'
+const LAYOUT_KEY = 'vulcain.dock.v2'
 
 const PANE_TITLE: Record<PaneId, string> = {
   tree: 'Tree',
@@ -146,13 +147,13 @@ function defaultPosition(api: DockviewApi, id: PaneId) {
   if (id === 'tree') return { direction: 'left' as const }
   if (id === 'agent') return { direction: 'right' as const }
   if (id === 'preview') {
-    if (api.getPanel('editor')) return { referencePanel: 'editor', direction: 'below' as const }
+    if (api.getPanel('editor')) return { referencePanel: 'editor', direction: 'right' as const }
     if (api.getPanel('agent')) return { referencePanel: 'agent', direction: 'left' as const }
     if (api.getPanel('tree')) return { referencePanel: 'tree', direction: 'right' as const }
     return { direction: 'right' as const }
   }
   if (id === 'editor') {
-    if (api.getPanel('preview')) return { referencePanel: 'preview', direction: 'above' as const }
+    if (api.getPanel('preview')) return { referencePanel: 'preview', direction: 'left' as const }
     if (api.getPanel('agent')) return { referencePanel: 'agent', direction: 'left' as const }
     if (api.getPanel('tree')) return { referencePanel: 'tree', direction: 'right' as const }
     return { direction: 'right' as const }
@@ -170,36 +171,39 @@ function applyDefaultLayout(api: DockviewApi, visible: Record<PaneId, boolean>):
       component: 'editor',
       title: PANE_TITLE.editor,
       minimumWidth: 180,
-      minimumHeight: 120,
       position: visible.tree ? { referencePanel: 'tree', direction: 'right' } : undefined
     })
   }
-  // Split the editor column first so preview height cannot be applied as a column width.
   if (visible.preview) {
     const ref = visible.editor ? 'editor' : visible.tree ? 'tree' : undefined
     api.addPanel({
       id: 'preview',
       component: 'preview',
       title: PANE_TITLE.preview,
-      position: ref
-        ? { referencePanel: ref, direction: visible.editor ? 'below' : 'right' }
-        : undefined
+      minimumWidth: 180,
+      position: ref ? { referencePanel: ref, direction: 'right' } : undefined
     })
   }
   if (visible.agent) {
-    const ref = visible.editor ? 'editor' : visible.preview ? 'preview' : visible.tree ? 'tree' : undefined
+    const ref = visible.preview ? 'preview' : visible.editor ? 'editor' : visible.tree ? 'tree' : undefined
     api.addPanel({
       id: 'agent',
       component: 'agent',
       title: PANE_TITLE.agent,
       initialWidth: 360,
+      minimumWidth: 180,
       position: ref ? { referencePanel: ref, direction: 'right' } : undefined
     })
   }
   api.getPanel('editor')?.api.setActive()
 }
 
-function restoreLayout(api: DockviewApi, fallback: Record<PaneId, boolean>): void {
+function applyDefaultSizes(api: DockviewApi): void {
+  api.getPanel('tree')?.api.setSize({ width: 240 })
+  api.getPanel('agent')?.api.setSize({ width: 360 })
+}
+
+function restoreLayout(api: DockviewApi, fallback: Record<PaneId, boolean>): boolean {
   try {
     const raw = localStorage.getItem(LAYOUT_KEY)
     if (raw) {
@@ -213,11 +217,12 @@ function restoreLayout(api: DockviewApi, fallback: Record<PaneId, boolean>): voi
         parsed.grid.height >= 8
       ) {
         api.fromJSON(parsed)
-        return
+        return true
       }
     }
   } catch {}
   applyDefaultLayout(api, fallback)
+  return false
 }
 
 interface Props {
@@ -240,6 +245,7 @@ const Workbench = forwardRef<WorkbenchHandle, Props>(function Workbench(
   const apiRef = useRef<DockviewApi | null>(null)
   const hostRef = useRef<HTMLDivElement>(null)
   const persistTimer = useRef(0)
+  const restoredRef = useRef(false)
   const [live, setLive] = useState<LiveDoc>({ path: null, text: '' })
   const initialPanes = useRef(panes)
 
@@ -289,10 +295,13 @@ const Workbench = forwardRef<WorkbenchHandle, Props>(function Workbench(
     (event: DockviewReadyEvent) => {
       const api = event.api
       apiRef.current = api
-      restoreLayout(api, initialPanes.current)
+      restoredRef.current = restoreLayout(api, initialPanes.current)
       syncPanes(api)
       api.getPanel('editor')?.api.setActive()
-      requestAnimationFrame(() => fitLayout(api))
+      requestAnimationFrame(() => {
+        fitLayout(api)
+        if (!restoredRef.current) applyDefaultSizes(api)
+      })
       api.onDidLayoutChange(() => {
         window.clearTimeout(persistTimer.current)
         persistTimer.current = window.setTimeout(() => persistLayout(api), 200)
@@ -302,6 +311,17 @@ const Workbench = forwardRef<WorkbenchHandle, Props>(function Workbench(
     },
     [fitLayout, syncPanes]
   )
+
+  useEffect(() => {
+    const el = hostRef.current
+    if (!el) return
+    const ro = new ResizeObserver(() => {
+      const api = apiRef.current
+      if (api) fitLayout(api)
+    })
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [fitLayout])
 
   const dockTheme = useMemo(() => {
     const base = theme === 'light' ? themeLight : themeDark
@@ -319,6 +339,7 @@ const Workbench = forwardRef<WorkbenchHandle, Props>(function Workbench(
           theme={dockTheme}
           components={dockComponents}
           watermarkComponent={Watermark}
+          disableAutoResizing
           getTabContextMenuItems={() => ['close', 'closeOthers', 'closeAll', 'maximize']}
           onReady={onReady}
         />
