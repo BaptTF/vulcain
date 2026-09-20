@@ -622,11 +622,62 @@ check('fast switcher lists configured workspace', await wsItem('Notes').isVisibl
 check('fast switcher lists config workspace', await wsItem('Config').isVisible())
 // switch away and back through the dropdown
 await wsItem('Config').click()
-await page.waitForTimeout(300)
+await page.waitForTimeout(500)
 console.log(`  trigger after Config: ${(await wsTrigger.textContent())?.trim()}`)
+const notesTabsAfterSwitch = await page.evaluate(() => localStorage.getItem('vulcain.tabs.Notes'))
+const configTabsAfterSwitch = await page.evaluate(() => localStorage.getItem('vulcain.tabs.__config__'))
+check(
+  'notes tabs stay stored under Notes after switch',
+  !!notesTabsAfterSwitch && notesTabsAfterSwitch.includes('welcome.md')
+)
+check(
+  'config tabs do not include files from Notes',
+  !configTabsAfterSwitch?.includes('welcome.md')
+)
+check(
+  'welcome.md tab is not open in the other workspace',
+  (await page.locator('.tab', { hasText: 'welcome.md' }).count()) === 0
+)
+
+const file500s = []
+const leakedWelcomeReads = []
+const onSwitchResp = r => {
+  if (r.url().includes('/api/fs/file') && r.status() >= 500) file500s.push(`${r.status()} ${r.url()}`)
+}
+const onSwitchReq = r => {
+  if (r.url().includes('/api/fs/file') && r.url().includes('welcome.md') && r.url().includes('__config__')) {
+    leakedWelcomeReads.push(r.url())
+  }
+}
+page.on('response', onSwitchResp)
+page.on('request', onSwitchReq)
+
+await page.reload({ waitUntil: 'domcontentloaded' })
+await page.waitForTimeout(1500)
+check('reload after workspace switch keeps the app up', await page.locator('.topbar .logo').isVisible())
+check('still on config workspace after reload', /config/i.test((await wsTrigger.textContent()) ?? ''))
+check('reload does not 500 on files from the previous workspace', file500s.length === 0)
+if (file500s.length) console.log('  ->', file500s[0])
+check('reload does not fetch Notes files from Config', leakedWelcomeReads.length === 0)
+check(
+  'welcome.md tab still absent after reload in config',
+  (await page.locator('.tab', { hasText: 'welcome.md' }).count()) === 0
+)
+page.off('response', onSwitchResp)
+page.off('request', onSwitchReq)
+
 await wsTrigger.click()
 await page.waitForTimeout(300)
 await wsItem('Notes').click()
+let notesTabRestored = false
+for (let i = 0; i < 10; i++) {
+  await page.waitForTimeout(300)
+  if ((await page.locator('.tab', { hasText: 'welcome.md' }).count()) > 0) {
+    notesTabRestored = true
+    break
+  }
+}
+check('welcome.md tab restored when returning to Notes', notesTabRestored)
 let switchedBack = false
 for (let i = 0; i < 10; i++) {
   await page.waitForTimeout(300)

@@ -21,11 +21,27 @@ const BINARY_EXT = new Set([
 
 const SKIP_DIRS = new Set(['node_modules', '.git', '__pycache__', '.venv', 'target'])
 
+function httpError(statusCode: number, message: string): Error {
+  const err = new Error(message) as Error & { statusCode: number }
+  err.statusCode = statusCode
+  return err
+}
+
 function workspace(name: string | undefined) {
   const cfg = loadConfig()
   const ws = findWorkspace(cfg, name ?? '')
-  if (!ws) throw new Error(`unknown workspace: ${name}`)
+  if (!ws) throw httpError(404, `unknown workspace: ${name}`)
   return ws
+}
+
+async function statInWorkspace(ws: ReturnType<typeof workspace>, rel: string) {
+  const abs = resolveInWorkspace(ws, rel)
+  try {
+    return { abs, st: await fsp.stat(abs) }
+  } catch (e: any) {
+    if (e?.code === 'ENOENT') throw httpError(404, 'file not found')
+    throw e
+  }
 }
 
 function isSandboxed(): boolean {
@@ -124,9 +140,8 @@ export function registerFsApi(app: FastifyInstance): void {
   app.get('/api/fs/file', async (req, reply) => {
     const q = req.query as { ws?: string; path?: string }
     const ws = workspace(q.ws)
-    const abs = resolveInWorkspace(ws, q.path ?? '')
-    const st = await fsp.stat(abs)
-    if (!st.isFile()) throw new Error('not a file')
+    const { abs, st } = await statInWorkspace(ws, q.path ?? '')
+    if (!st.isFile()) throw httpError(404, 'not a file')
     const ext = path.extname(abs).slice(1).toLowerCase()
     if (BINARY_EXT.has(ext)) {
       const data = await fsp.readFile(abs)
@@ -139,9 +154,8 @@ export function registerFsApi(app: FastifyInstance): void {
   app.get('/api/fs/download', async (req, reply) => {
     const q = req.query as { ws?: string; path?: string }
     const ws = workspace(q.ws)
-    const abs = resolveInWorkspace(ws, q.path ?? '')
-    const st = await fsp.stat(abs)
-    if (!st.isFile()) throw new Error('not a file')
+    const { abs, st } = await statInWorkspace(ws, q.path ?? '')
+    if (!st.isFile()) throw httpError(404, 'not a file')
     const name = path.basename(abs)
     const ext = path.extname(abs).slice(1).toLowerCase()
     reply.header('content-type', mimeOf(ext))

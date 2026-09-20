@@ -188,13 +188,19 @@ export default function EditorPane({
           }
         })
         .catch(e => {
-          if (!cancelled) setContents(prev => ({ ...prev, [path]: `// erreur de lecture: ${e.message}` }))
+          if (cancelled) return
+          const msg = String((e as Error)?.message ?? e)
+          if (/read failed 404|file not found|ENOENT/i.test(msg)) {
+            onClose(path)
+            return
+          }
+          setContents(prev => ({ ...prev, [path]: `// erreur de lecture: ${msg}` }))
         })
       return () => {
         cancelled = true
       }
     },
-    [ws]
+    [ws, onClose]
   )
 
   useEffect(() => {

@@ -10,16 +10,56 @@ import WorkspaceSwitcher from './components/WorkspaceSwitcher'
 
 type PaneId = 'tree' | 'editor' | 'preview' | 'agent'
 
+type SavedTabs = { tabs: string[]; active: string | null }
+
+function storedWorkspace(): string {
+  try {
+    return localStorage.getItem('vulcain.ws') ?? ''
+  } catch {
+    return ''
+  }
+}
+
+function tabsKey(ws: string): string {
+  return `vulcain.tabs.${ws}`
+}
+
+function readSavedTabs(ws: string): SavedTabs {
+  if (!ws) return { tabs: [], active: null }
+  try {
+    const raw = localStorage.getItem(tabsKey(ws))
+    if (!raw) return { tabs: [], active: null }
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed?.tabs)) return { tabs: [], active: null }
+    const paths = parsed.tabs.filter((p: unknown): p is string => typeof p === 'string')
+    const active =
+      typeof parsed.active === 'string' && paths.includes(parsed.active)
+        ? parsed.active
+        : (paths[0] ?? null)
+    return { tabs: paths, active }
+  } catch {
+    return { tabs: [], active: null }
+  }
+}
+
+function persistTabs(ws: string, tabs: Tab[], active: string | null): void {
+  if (!ws) return
+  try {
+    localStorage.setItem(tabsKey(ws), JSON.stringify({ tabs: tabs.map(t => t.path), active }))
+  } catch {}
+}
+
+function tabsFromSaved(saved: SavedTabs): Tab[] {
+  return saved.tabs.map(p => ({ path: p }))
+}
+
 export default function App() {
   const [meta, setMeta] = useState<Meta | null>(null)
-  const [activeWs, setActiveWs] = useState<string>(() => localStorage.getItem('vulcain.ws') ?? '')
-  const [tabs, setTabs] = useState<Tab[]>([])
-  const [activeTab, setActiveTab] = useState<string | null>(null)
-  const [restored, setRestored] = useState(false)
+  const [activeWs, setActiveWs] = useState<string>(() => storedWorkspace())
+  const [tabs, setTabs] = useState<Tab[]>(() => tabsFromSaved(readSavedTabs(storedWorkspace())))
+  const [activeTab, setActiveTab] = useState<string | null>(() => readSavedTabs(storedWorkspace()).active)
   const [wsModalOpen, setWsModalOpen] = useState(false)
   const flushRef = useRef<(() => void) | null>(null)
-  const activeWsRef = useRef(activeWs)
-  activeWsRef.current = activeWs
 
   const [panes, setPanes] = useState<Record<PaneId, boolean>>(() => {
     try {
@@ -73,37 +113,27 @@ export default function App() {
     panelIds: outerPanelIds
   })
 
-  const tabsKey = (ws: string) => `vulcain.tabs.${ws}`
-  const readSaved = useCallback((ws: string): { tabs: string[]; active: string | null } => {
-    try {
-      const raw = localStorage.getItem(`vulcain.tabs.${ws}`)
-      if (!raw) return { tabs: [], active: null }
-      const parsed = JSON.parse(raw)
-      if (Array.isArray(parsed.tabs) && typeof parsed.active === 'string') {
-        return { tabs: parsed.tabs as string[], active: parsed.active }
-      }
-    } catch {}
-    return { tabs: [], active: null }
+  const applyWorkspace = useCallback((name: string, persistFrom?: { ws: string; tabs: Tab[]; active: string | null }) => {
+    if (!name) return
+    if (persistFrom?.ws && persistFrom.ws !== name) {
+      flushRef.current?.()
+      persistTabs(persistFrom.ws, persistFrom.tabs, persistFrom.active)
+    }
+    const saved = readSavedTabs(name)
+    setActiveWs(name)
+    setTabs(tabsFromSaved(saved))
+    setActiveTab(saved.active)
   }, [])
-
-  const restoreTabs = useCallback(
-    (ws: string) => {
-      const saved = readSaved(ws)
-      setTabs(saved.tabs.map(p => ({ path: p })))
-      setActiveTab(saved.active)
-    },
-    [readSaved]
-  )
 
   useEffect(() => {
     getMeta().then(m => {
       setMeta(m)
       if (!localStorage.getItem('vulcain.ws')) {
-        setActiveWs(m.defaultWorkspace)
+        applyWorkspace(m.defaultWorkspace)
         if (m.defaultWorkspace === '__config__') setWsModalOpen(true)
       }
     })
-  }, [])
+  }, [applyWorkspace])
 
   useEffect(() => {
     document.documentElement.dataset.theme = meta?.theme ?? 'dark'
@@ -120,21 +150,8 @@ export default function App() {
   }, [activeWs])
 
   useEffect(() => {
-    if (!restored) return
-    try {
-      localStorage.setItem(
-        tabsKey(activeWs),
-        JSON.stringify({ tabs: tabs.map(t => t.path), active: activeTab })
-      )
-    } catch {}
-  }, [tabs, activeTab, activeWs, restored, tabsKey])
-
-  useEffect(() => {
-    if (activeWsRef.current && activeWsRef.current !== activeWs) flushRef.current?.()
-    setRestored(false)
-    restoreTabs(activeWs)
-    setRestored(true)
-  }, [activeWs, restoreTabs])
+    persistTabs(activeWs, tabs, activeTab)
+  }, [tabs, activeTab, activeWs])
 
   const openFile = useCallback((path: string) => {
     setTabs(prev => {
@@ -164,9 +181,9 @@ export default function App() {
   const isConfigWs = activeWs === '__config__'
 
   const selectWorkspace = useCallback((name: string) => {
-    setActiveWs(name)
+    if (name !== activeWs) applyWorkspace(name, { ws: activeWs, tabs, active: activeTab })
     getMeta().then(setMeta).catch(() => {})
-  }, [])
+  }, [applyWorkspace, activeWs, tabs, activeTab])
 
   return (
     <div className="app">
@@ -233,6 +250,7 @@ export default function App() {
             <Panel id="center" minSize="10">
               <div className="panel-center">
                 <EditorPane
+                  key={activeWs}
                   ws={activeWs}
                   tabs={tabs}
                   activePath={activeTab}

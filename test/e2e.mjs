@@ -81,6 +81,11 @@ await reqJson('PUT', '/api/fs/file', { ws: 'Notes', path: clashFile, content: 'x
 const mkdirClash = await reqJson('POST', '/api/fs/mkdir', { ws: 'Notes', path: clashFile })
 check('fs: mkdir on existing file gives clear error', mkdirClash.status === 500 && /fichier porte déjà ce nom/.test(mkdirClash.body.error ?? ''))
 
+const missing = await reqJson('GET', `/api/fs/file?ws=Notes&path=__no_such_${Date.now()}.md`)
+check('fs: missing file is 404', missing.status === 404)
+const missingUnknownWs = await reqJson('GET', `/api/fs/file?ws=__nope__&path=welcome.md`)
+check('fs: unknown workspace is 404', missingUnknownWs.status === 404)
+
 const createdWs = `__created_${Date.now()}`
 const createWs = await reqJson('POST', '/api/workspaces', { name: createdWs, create: true })
 check('workspaces: create creates folder + registers', createWs.status === 200 && createWs.body?.ok)
