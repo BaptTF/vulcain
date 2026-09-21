@@ -84,6 +84,9 @@ function TreeDock(_props: IDockviewPanelProps) {
 
 function EditorDock(_props: IDockviewPanelProps) {
   const { ws, tabs, activePath, onActivate, onClose, flushRef, setLive } = useWorkbench()
+  const onLiveChange = useCallback((path: string | null, text: string) => {
+    setLive({ path, text })
+  }, [setLive])
   return (
     <div className="panel-center" data-testid="editor">
       <EditorPane
@@ -93,7 +96,7 @@ function EditorDock(_props: IDockviewPanelProps) {
         onActivate={onActivate}
         onClose={onClose}
         flushRef={flushRef}
-        onLiveChange={(path, text) => setLive({ path, text })}
+        onLiveChange={onLiveChange}
       />
     </div>
   )
@@ -345,7 +348,10 @@ const Workbench = forwardRef<WorkbenchHandle, Props>(function Workbench(
   const restoredRef = useRef(false)
   const sashDragging = useRef(false)
   const paneSizes = useRef(readPaneSizes())
-  const [live, setLive] = useState<LiveDoc>({ path: null, text: '' })
+  const [live, setLiveState] = useState<LiveDoc>({ path: null, text: '' })
+  const setLive = useCallback((doc: LiveDoc) => {
+    setLiveState(prev => (prev.path === doc.path && prev.text === doc.text ? prev : doc))
+  }, [])
   const initialPanes = useRef(panes)
 
   // Dockview's demo saves on an explicit action. onDidLayoutChange fires
@@ -410,7 +416,7 @@ const Workbench = forwardRef<WorkbenchHandle, Props>(function Workbench(
       live,
       setLive
     }),
-    [ws, tabs, activePath, onActivate, onClose, onOpen, flushRef, live]
+    [ws, tabs, activePath, onActivate, onClose, onOpen, flushRef, live, setLive]
   )
 
   const syncPanes = useCallback(

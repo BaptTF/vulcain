@@ -156,7 +156,9 @@ function AuiEditComposer(): ReactNode {
   return (
     <MessagePrimitive.Root className="aui-msg aui-edit">
       <ComposerPrimitive.Root className="aui-composer">
-        <ComposerPrimitive.Input className="aui-composer-input" rows={3} autoFocus />
+        <ComposerPrimitive.Input asChild autoFocus>
+          <textarea className="aui-composer-input" rows={3} />
+        </ComposerPrimitive.Input>
         <div className="aui-composer-actions">
           <ComposerPrimitive.Cancel asChild>
             <button type="button" className="btn">
@@ -253,12 +255,13 @@ function AuiComposer(): ReactNode {
   const isRunning = useAuiState((s: any) => s.thread.isRunning)
   return (
     <ComposerPrimitive.Root className="aui-composer">
-      <ComposerPrimitive.Input
-        className="aui-composer-input"
-        placeholder="Écrivez à l'agent… (Entrée pour envoyer)"
-        rows={2}
-        autoFocus={false}
-      />
+      <ComposerPrimitive.Input asChild autoFocus={false}>
+        <textarea
+          className="aui-composer-input"
+          placeholder="Écrivez à l'agent… (Entrée pour envoyer)"
+          rows={2}
+        />
+      </ComposerPrimitive.Input>
       <div className="aui-composer-actions">
         {isRunning ? (
           <ComposerPrimitive.Cancel asChild>

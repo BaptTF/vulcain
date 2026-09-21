@@ -1067,6 +1067,7 @@ button, input, textarea, select {
   padding: 8px 10px;
   min-height: 48px;
   max-height: 160px;
+  overflow-y: auto;
   outline: none;
 }
 

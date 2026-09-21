@@ -256,11 +256,13 @@ export default function EditorPane({
     [doSave, onClose]
   )
 
+  const onLiveChangeRef = useRef(onLiveChange)
+  onLiveChangeRef.current = onLiveChange
   const content = activePath ? contents[activePath] ?? '' : ''
 
   useEffect(() => {
-    onLiveChange?.(activePath, content)
-  }, [activePath, content, onLiveChange])
+    onLiveChangeRef.current?.(activePath, content)
+  }, [activePath, content])
 
   return (
     <>
