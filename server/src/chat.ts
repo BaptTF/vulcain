@@ -338,6 +338,7 @@ class FakeChatSession implements ChatSession {
       type: 'tool_result',
       toolCall: { toolCallId: 't1', toolName: 'read', status: 'completed', result: 'file contents here' }
     })
+    this.emit({ type: 'text_delta', contentIndex: 0, delta: 'après lecture' })
     this.emit({ type: 'done' })
   }
 
@@ -358,7 +359,7 @@ class FakeChatSession implements ChatSession {
   getUsage(): { usage: ChatUsage; contextUsage: ChatContextUsage } {
     return {
       usage: { inputTokens: 42, outputTokens: 7, cachedInputTokens: 10, totalTokens: 49 },
-      contextUsage: { tokens: 12000, contextWindow: 200000, percent: 6 }
+      contextUsage: { tokens: 12000, contextWindow: 200000, percent: 6.129 }
     }
   }
 
@@ -516,14 +517,42 @@ export function registerChat(app: FastifyInstance, backend?: ChatBackend): void 
     const stream = createUIMessageStream({
       async execute({ writer }) {
         writer.write({ type: 'start' })
-        let textStarted = false
-        let reasoningStarted = false
+        let textId: string | undefined
+        let textContentIndex: number | undefined
+        let textSeq = 0
+        let reasoningId: string | undefined
+        let reasoningSeq = 0
         let finished = false
+        const closeText = () => {
+          if (!textId) return
+          writer.write({ type: 'text-end', id: textId })
+          textId = undefined
+          textContentIndex = undefined
+        }
+        const closeReasoning = () => {
+          if (!reasoningId) return
+          writer.write({ type: 'reasoning-end', id: reasoningId })
+          reasoningId = undefined
+        }
         const closeParts = () => {
-          if (reasoningStarted) writer.write({ type: 'reasoning-end', id: 'reasoning' })
-          if (textStarted) writer.write({ type: 'text-end', id: 'text' })
-          reasoningStarted = false
-          textStarted = false
+          closeReasoning()
+          closeText()
+        }
+        const ensureText = (contentIndex: number) => {
+          closeReasoning()
+          if (textId && textContentIndex !== contentIndex) closeText()
+          if (textId) return
+          textId = `text-${textSeq}`
+          textSeq += 1
+          textContentIndex = contentIndex
+          writer.write({ type: 'text-start', id: textId })
+        }
+        const ensureReasoning = () => {
+          closeText()
+          if (reasoningId) return
+          reasoningId = `reasoning-${reasoningSeq}`
+          reasoningSeq += 1
+          writer.write({ type: 'reasoning-start', id: reasoningId })
         }
         const finish = (outcome: 'completed' | 'failed' | 'aborted', error?: string) => {
           if (finished) return
@@ -545,20 +574,15 @@ export function registerChat(app: FastifyInstance, backend?: ChatBackend): void 
         const unsubscribe = session.subscribe(event => {
           switch (event.type) {
             case 'text_delta':
-              if (!textStarted) {
-                writer.write({ type: 'text-start', id: 'text' })
-                textStarted = true
-              }
-              writer.write({ type: 'text-delta', id: 'text', delta: event.delta })
+              ensureText(event.contentIndex)
+              writer.write({ type: 'text-delta', id: textId!, delta: event.delta })
               break
             case 'reasoning_delta':
-              if (!reasoningStarted) {
-                writer.write({ type: 'reasoning-start', id: 'reasoning' })
-                reasoningStarted = true
-              }
-              writer.write({ type: 'reasoning-delta', id: 'reasoning', delta: event.delta })
+              ensureReasoning()
+              writer.write({ type: 'reasoning-delta', id: reasoningId!, delta: event.delta })
               break
             case 'tool_call':
+              closeParts()
               writer.write({
                 type: 'tool-input-available',
                 toolCallId: event.toolCall.toolCallId,

@@ -900,15 +900,33 @@ await page.locator('.aui-composer-input').fill('ping')
 await page.locator('.aui-composer-input').press('Enter')
 let echoReceived = false
 let toolCardSeen = false
+let followUpSeen = false
 for (let i = 0; i < 20; i++) {
   await page.waitForTimeout(500)
   const text = await threadText()
   if (text.includes('echo: ping')) echoReceived = true
   if (await page.locator('.tool-card').count()) toolCardSeen = true
-  if (echoReceived && toolCardSeen) break
+  if (text.includes('après lecture')) followUpSeen = true
+  if (echoReceived && toolCardSeen && followUpSeen) break
 }
 check('message sent streams the echo back', echoReceived)
 check('tool call rendered as a card', toolCardSeen)
+const assistantPartsOrder = await page.evaluate(() => {
+  const msg = document.querySelector('.aui-msg-assistant')
+  if (!msg) return []
+  return [...msg.querySelectorAll('.aui-markdown, .tool-card')].map(el =>
+    el.classList.contains('tool-card') ? 'tool' : (el.textContent ?? '').replace(/\s+/g, ' ').trim()
+  )
+})
+check(
+  'follow-up assistant text renders below the tool card',
+  assistantPartsOrder.length >= 3 &&
+    assistantPartsOrder[0].includes('echo: ping') &&
+    assistantPartsOrder.includes('tool') &&
+    assistantPartsOrder.at(-1)?.includes('après lecture') &&
+    assistantPartsOrder.findIndex(p => p === 'tool') > 0 &&
+    assistantPartsOrder.findIndex(p => p === 'tool') < assistantPartsOrder.length - 1
+)
 
 // scroll-to-bottom button: hidden at the bottom, appears once the user scrolls up
 // wait for the ping run to complete (composer back to "Envoyer")
@@ -1000,6 +1018,8 @@ check(
   await page.locator('.aui-msg-assistant .aui-action-bar button[title="Copier"]').first().isVisible()
 )
 check('usage bar visible after a message', await page.locator('.aui-usage').isVisible())
+const usageLabel = (await page.locator('.aui-usage-label').textContent()) ?? ''
+check('usage percent shows two decimal places', /^\d+\.\d{2}%/.test(usageLabel.trim()))
 
 // outside click closes the dropdown
 await page.locator('.aui-composer-input').click()

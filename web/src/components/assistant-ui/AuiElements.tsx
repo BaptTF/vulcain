@@ -316,18 +316,20 @@ export function AuiUsageBar(): ReactNode {
   })
   if (!contextUsage || contextUsage.contextWindow <= 0) return null
   const percent =
-    contextUsage.percent ??
-    (contextUsage.tokens && contextUsage.contextWindow
-      ? Math.round((contextUsage.tokens / contextUsage.contextWindow) * 100)
-      : 0)
+    typeof contextUsage.percent === 'number'
+      ? contextUsage.percent
+      : contextUsage.tokens && contextUsage.contextWindow
+        ? (contextUsage.tokens / contextUsage.contextWindow) * 100
+        : 0
+  const percentLabel = percent.toFixed(2)
   const warn = percent >= 70
   return (
-    <div className={`aui-usage${warn ? ' warn' : ''}`} title={`${percent}% du contexte utilisé`}>
+    <div className={`aui-usage${warn ? ' warn' : ''}`} title={`${percentLabel}% du contexte utilisé`}>
       <div className="aui-usage-track">
         <div className="aui-usage-fill" style={{ width: `${Math.min(100, percent)}%` }} />
       </div>
       <span className="aui-usage-label">
-        {percent}%{tokens?.totalTokens != null ? ` · ${tokens.totalTokens} tok` : ''}
+        {percentLabel}%{tokens?.totalTokens != null ? ` · ${tokens.totalTokens} tok` : ''}
       </span>
     </div>
   )

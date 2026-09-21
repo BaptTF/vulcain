@@ -149,8 +149,25 @@ const stream = await withTimeout(
   'chat stream'
 )
 check('chat: POST /api/chat returns 200', stream.status === 200)
-const textDelta = stream.chunks.filter(c => c.type === 'text-delta').map(c => c.delta).join('')
-check('chat: text streamed (echo)', textDelta === 'echo: bonjour')
+const textStarts = stream.chunks.filter(c => c.type === 'text-start')
+const types = stream.chunks.map(c => c.type)
+const firstTool = types.indexOf('tool-input-available')
+const firstTextEnd = types.lastIndexOf('text-end', firstTool)
+const secondTextStart = types.indexOf('text-start', firstTool)
+const textById = id =>
+  stream.chunks.filter(c => c.type === 'text-delta' && c.id === id).map(c => c.delta).join('')
+check('chat: text streamed (echo)', textById(textStarts[0]?.id) === 'echo: bonjour')
+check(
+  'chat: first text part ends before the tool call',
+  firstTool > 0 && firstTextEnd > 0 && firstTextEnd < firstTool
+)
+check(
+  'chat: follow-up text starts after the tool call with a new part id',
+  secondTextStart > firstTool &&
+    textStarts[1]?.id &&
+    textStarts[1].id !== textStarts[0]?.id &&
+    textById(textStarts[1].id) === 'après lecture'
+)
 check(
   'chat: tool call part received',
   stream.chunks.some(c => c.type === 'tool-input-available' && c.toolName === 'read')
