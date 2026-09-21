@@ -115,6 +115,12 @@ function Watermark() {
   return <div className="empty-state">Réouvrez un panneau depuis la barre du haut</div>
 }
 
+const TAB_CONTEXT_MENU_ITEMS = ['close', 'closeOthers', 'closeAll', 'maximize'] as const
+
+function getTabContextMenuItems() {
+  return [...TAB_CONTEXT_MENU_ITEMS]
+}
+
 function panesFromApi(api: DockviewApi): Record<PaneId, boolean> {
   const open = new Set(api.panels.map(p => p.id))
   return {
@@ -243,26 +249,15 @@ const Workbench = forwardRef<WorkbenchHandle, Props>(function Workbench(
   ref
 ) {
   const apiRef = useRef<DockviewApi | null>(null)
-  const hostRef = useRef<HTMLDivElement>(null)
   const persistTimer = useRef(0)
   const restoredRef = useRef(false)
   const sashDragging = useRef(false)
   const [live, setLive] = useState<LiveDoc>({ path: null, text: '' })
   const initialPanes = useRef(panes)
 
-  // Auto-resize calls api.layout() from a rAF'd ResizeObserver. layout()
-  // reapplies the last saveProportions() snapshot, which is only updated on
-  // sash pointerup — so any layout() during a drag snaps the sash back.
-  const fitHost = useCallback(() => {
-    const api = apiRef.current
-    const el = hostRef.current
-    if (!api || !el || sashDragging.current) return
-    const { width, height } = el.getBoundingClientRect()
-    if (width < 8 || height < 8) return
-    if (Math.abs(api.width - width) < 2 && Math.abs(api.height - height) < 2) return
-    api.layout(width, height)
-  }, [])
-
+  // Dockview's demo saves on an explicit action. onDidLayoutChange fires
+  // throughout a sash drag; writing that snapshot is harmless, but restoring
+  // it later would freeze mid-gesture sizes. Skip until pointerup.
   const flushPersist = useCallback(() => {
     window.clearTimeout(persistTimer.current)
     persistTimer.current = 0
@@ -286,12 +281,7 @@ const Workbench = forwardRef<WorkbenchHandle, Props>(function Workbench(
     const up = () => {
       if (!sashDragging.current) return
       sashDragging.current = false
-      // Dockview saveProportions() runs on the bubble pointerup. Wait so we
-      // persist the new sizes and never layout() with the pre-drag snapshot.
-      queueMicrotask(() => {
-        flushPersist()
-        fitHost()
-      })
+      queueMicrotask(flushPersist)
     }
     const onHide = () => {
       if (document.visibilityState === 'hidden') flushPersist()
@@ -309,15 +299,7 @@ const Workbench = forwardRef<WorkbenchHandle, Props>(function Workbench(
       document.removeEventListener('visibilitychange', onHide)
       window.clearTimeout(persistTimer.current)
     }
-  }, [fitHost, flushPersist])
-
-  useEffect(() => {
-    const el = hostRef.current
-    if (!el) return
-    const ro = new ResizeObserver(() => fitHost())
-    ro.observe(el)
-    return () => ro.disconnect()
-  }, [fitHost])
+  }, [flushPersist])
 
   const value = useMemo<WorkbenchValue>(
     () => ({
@@ -355,26 +337,17 @@ const Workbench = forwardRef<WorkbenchHandle, Props>(function Workbench(
     (event: DockviewReadyEvent) => {
       const api = event.api
       apiRef.current = api
-      const grid = api as unknown as {
-        component: { layout: (width: number, height: number, force?: boolean) => void }
-      }
-      const layoutGrid = grid.component.layout.bind(grid.component)
-      grid.component.layout = (width, height, force) => {
-        if (sashDragging.current) return
-        layoutGrid(width, height, force)
-      }
       restoredRef.current = restoreLayout(api, initialPanes.current)
       syncPanes(api)
       api.getPanel('editor')?.api.setActive()
       requestAnimationFrame(() => {
-        fitHost()
         if (!restoredRef.current) applyDefaultSizes(api)
       })
       api.onDidLayoutChange(() => schedulePersist())
       api.onDidAddPanel(() => syncPanes(api))
       api.onDidRemovePanel(() => syncPanes(api))
     },
-    [fitHost, schedulePersist, syncPanes]
+    [schedulePersist, syncPanes]
   )
 
   const dockTheme = useMemo(() => {
@@ -388,16 +361,15 @@ const Workbench = forwardRef<WorkbenchHandle, Props>(function Workbench(
 
   return (
     <WorkbenchContext.Provider value={value}>
-      <div className="vulcain-dock" ref={hostRef}>
+      <div className="vulcain-dock">
         <DockviewReact
           theme={dockTheme}
           components={dockComponents}
           watermarkComponent={Watermark}
-          disableAutoResizing
           // Panes are singletons toggled from the view bar; disable group DND
           // so the tab-bar void next to a sash cannot steal a resize drag.
           disableDnd
-          getTabContextMenuItems={() => ['close', 'closeOthers', 'closeAll', 'maximize']}
+          getTabContextMenuItems={getTabContextMenuItems}
           onReady={onReady}
         />
       </div>
