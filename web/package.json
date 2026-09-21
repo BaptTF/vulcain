@@ -4,9 +4,9 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "predev": "node scripts/copy-typst-wasm.mjs",
+    "predev": "node scripts/copy-typst-wasm.mjs && node scripts/copy-typst-fonts.mjs",
     "dev": "vite",
-    "prebuild": "node scripts/copy-typst-wasm.mjs",
+    "prebuild": "node scripts/copy-typst-wasm.mjs && node scripts/copy-typst-fonts.mjs",
     "build": "tsc && vite build"
   },
   "dependencies": {

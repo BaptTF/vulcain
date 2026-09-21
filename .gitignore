@@ -1,6 +1,7 @@
 node_modules/
 dist/
 web/public/assets/*.wasm
+web/public/fonts/
 *.log
 .DS_Store
 test/ui/ui-result.png

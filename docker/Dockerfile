@@ -12,19 +12,10 @@ RUN npm run build
 FROM node:22-slim AS runtime
 WORKDIR /app
 
-# Atkinson Hyperlegible is not in Debian bookworm (node:22-slim); pin the
-# upstream commit also used by Debian's fonts-atkinson-hyperlegible package.
-ARG ATKINSON_COMMIT=1cb311624b2ddf88e9e37873999d165a8cd28b46
 RUN apt-get update \
   && apt-get install -y --no-install-recommends \
     git bash ca-certificates curl poppler-utils xz-utils \
     fontconfig fonts-liberation \
-  && mkdir -p /usr/share/fonts/opentype/atkinson-hyperlegible \
-  && for face in Regular Italic Bold BoldItalic; do \
-       curl -fsSL -o "/usr/share/fonts/opentype/atkinson-hyperlegible/AtkinsonHyperlegible-${face}.otf" \
-         "https://raw.githubusercontent.com/googlefonts/atkinson-hyperlegible/${ATKINSON_COMMIT}/fonts/otf/AtkinsonHyperlegible-${face}.otf"; \
-     done \
-  && fc-cache -f \
   && rm -rf /var/lib/apt/lists/*
 
 ENV PI_CODING_AGENT_DIR=/data/.pi
@@ -50,6 +41,8 @@ COPY --from=build /app/web/dist ./web/dist
 COPY --from=build /app/pi-ext/dist ./pi-ext/dist
 COPY --from=build /app/scripts ./scripts
 COPY --from=build /app/package.json ./package.json
+COPY --from=build /app/web/dist/fonts /usr/share/fonts/opentype/vulcain
+RUN fc-cache -f
 
 EXPOSE 7331
 

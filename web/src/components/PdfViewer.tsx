@@ -4,6 +4,11 @@ import '../pdf-worker'
 import 'react-pdf/dist/Page/AnnotationLayer.css'
 import 'react-pdf/dist/Page/TextLayer.css'
 
+// pdf.js's default FontFace injection drops or substitutes many Typst-embedded
+// OpenType fonts (the native iframe viewer still looks correct). Draw glyphs
+// as paths instead so the preview matches the sibling PDF.
+const PDF_OPTIONS = { disableFontFace: true, useSystemFonts: false }
+
 const MIN_SCALE = 0.4
 const MAX_SCALE = 3
 const SCALE_STEP = 0.1
@@ -174,6 +179,7 @@ function PdfLayer({
     <div className={`pdf-layer${hidden ? ' is-hidden' : ''}`} aria-hidden={hidden || undefined}>
       <Document
         file={source}
+        options={PDF_OPTIONS}
         loading={null}
         onLoadSuccess={({ numPages: n }) => {
           numPagesRef.current = n

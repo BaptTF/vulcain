@@ -1,6 +1,13 @@
-import { $typst } from '@myriaddreamin/typst.ts/dist/esm/index.mjs'
+import { $typst, loadFonts } from '@myriaddreamin/typst.ts/dist/esm/index.mjs'
 
 let initPromise: Promise<void> | null = null
+
+const USER_FONTS = [
+  '/fonts/AtkinsonHyperlegible-Regular.otf',
+  '/fonts/AtkinsonHyperlegible-Italic.otf',
+  '/fonts/AtkinsonHyperlegible-Bold.otf',
+  '/fonts/AtkinsonHyperlegible-BoldItalic.otf'
+]
 
 export function siblingPdfPath(typPath: string): string {
   return typPath.replace(/\.typ$/i, '') + '.pdf'
@@ -10,7 +17,8 @@ export async function ensureTypstCompiler(): Promise<void> {
   if (!initPromise) {
     initPromise = (async () => {
       $typst.setCompilerInitOptions({
-        getModule: () => '/assets/typst_ts_web_compiler_bg.wasm'
+        getModule: () => '/assets/typst_ts_web_compiler_bg.wasm',
+        beforeBuild: [loadFonts(USER_FONTS)]
       })
     })()
     initPromise.catch(() => {

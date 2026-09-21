@@ -657,7 +657,7 @@ check('agent expandable after reload', await boxVisible('.panel-chat'))
 // --- typst preview compiles a sibling PDF and renders it with react-pdf ---
 await putFile(
   'page.typ',
-  '#set page(width: 10cm, height: 16cm)\n#align(center)[Typst Page]\n#pagebreak()\n#lorem(40)\n#pagebreak()\n#lorem(40)\n#pagebreak()\n#lorem(40)\n#pagebreak()\n#lorem(40)\n'
+  '#set text(font: "Atkinson Hyperlegible")\n#set page(width: 10cm, height: 16cm)\n#align(center)[Typst Page]\n#pagebreak()\n#lorem(40)\n#pagebreak()\n#lorem(40)\n#pagebreak()\n#lorem(40)\n#pagebreak()\n#lorem(40)\n'
 )
 await page.waitForTimeout(800)
 const typRow = page.locator('[role="treeitem"]', { hasText: 'page.typ' }).first()
@@ -700,16 +700,18 @@ if (typFound) {
 const siblingPdf = await page.evaluate(async () => {
   const ws = localStorage.getItem('vulcain.ws') || ''
   const r = await fetch(`/api/fs/file?ws=${encodeURIComponent(ws)}&path=page.pdf`)
-  if (!r.ok) return { ok: false, header: '', disposition: '', type: '' }
+  if (!r.ok) return { ok: false, header: '', disposition: '', type: '', hasAtkinson: false }
   const buf = new Uint8Array(await r.arrayBuffer())
   return {
     ok: true,
     header: new TextDecoder().decode(buf.slice(0, 4)),
     disposition: r.headers.get('content-disposition') || '',
-    type: r.headers.get('content-type') || ''
+    type: r.headers.get('content-type') || '',
+    hasAtkinson: new TextDecoder('latin1').decode(buf).includes('Atkinson')
   }
 })
 check('typst watch writes a sibling page.pdf', siblingPdf.ok && siblingPdf.header === '%PDF')
+check('typst preview embeds Atkinson Hyperlegible', siblingPdf.hasAtkinson)
 check(
   'sibling pdf is served inline for the native viewer',
   siblingPdf.type.includes('application/pdf') && siblingPdf.disposition.startsWith('inline')
