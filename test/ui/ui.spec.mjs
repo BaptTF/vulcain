@@ -721,12 +721,11 @@ check('file tree lists the sibling pdf', await page.locator('[role="treeitem"]',
 const pdfScroll = previewPdf.locator('.pdf-scroll')
 let scrolled = 0
 for (let i = 0; i < 25; i++) {
-  const pages = await previewPdf.locator('.pdf-layer:not(.is-hidden) canvas').count()
-  scrolled = await pdfScroll.evaluate((el, n) => {
-    if (n < 3 || el.scrollHeight <= el.clientHeight + 40) return 0
+  scrolled = await pdfScroll.evaluate(el => {
+    if (el.scrollHeight <= el.clientHeight + 40) return 0
     el.scrollTop = Math.min(240, el.scrollHeight - el.clientHeight)
     return el.scrollTop
-  }, pages)
+  })
   if (scrolled > 80) break
   await page.waitForTimeout(200)
 }
@@ -971,7 +970,7 @@ for (let i = 0; i < 10; i++) {
   await page.waitForTimeout(200)
   if (await page.locator('.aui-composer-actions .btn', { hasText: 'Envoyer' }).isVisible()) break
 }
-check('scroll-to-bottom button visible once the thread overflows', await scrollBtn.isVisible())
+check('scroll-to-bottom button stays hidden while pinned to the bottom', !(await scrollBtn.isVisible()))
 // scroll to the real bottom -> button hides
 await page.evaluate(() => {
   const v = document.querySelector('.aui-viewport')

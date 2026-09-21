@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { renderMarkdown } from '../markdown'
 import * as api from '../api'
 import { bytesToBase64, siblingPdfPath, ensureTypstCompiler, typstPdfBytes } from '../typst'
@@ -15,6 +15,7 @@ export function TypstView({ ws, path, source }: { ws: string; path: string; sour
   const [bytes, setBytes] = useState<Uint8Array | null>(null)
   const [err, setErr] = useState('')
   const pdfPath = siblingPdfPath(path)
+  const writeGen = useRef(0)
 
   useEffect(() => {
     let cancelled = false
@@ -33,14 +34,20 @@ export function TypstView({ ws, path, source }: { ws: string; path: string; sour
   useEffect(() => {
     if (!source) return
     let cancelled = false
+    const gen = ++writeGen.current
     const timer = window.setTimeout(async () => {
       try {
         const out = await typstPdfBytes(source)
         if (cancelled) return
-        await api.writeFileBase64(ws, pdfPath, bytesToBase64(out))
-        if (cancelled) return
         setBytes(out)
         setErr('')
+        // Paint the new PDF before the base64 + PUT; disk is for the sibling file / iframe.
+        requestAnimationFrame(() => {
+          if (cancelled || gen !== writeGen.current) return
+          const b64 = bytesToBase64(out)
+          if (cancelled || gen !== writeGen.current) return
+          void api.writeFileBase64(ws, pdfPath, b64).catch(() => {})
+        })
       } catch (e: any) {
         if (!cancelled) setErr(String(e?.message ?? e))
       }

@@ -45,7 +45,8 @@ function toolTitle(toolName: string, args: unknown): string | undefined {
 export function AuiThread({ onOpenFile }: { onOpenFile: (path: string) => void }): ReactNode {
   return (
     <ThreadPrimitive.Root className="aui-thread">
-      <ThreadPrimitive.Viewport turnAnchor="top" className="aui-viewport">
+      {/* turnAnchor="top" runs a 60fps rAF+setState loop in assistant-ui's reserve observer. */}
+      <ThreadPrimitive.Viewport className="aui-viewport">
         <div className="aui-messages">
           <ThreadPrimitive.Messages>{() => <AuiMessage onOpenFile={onOpenFile} />}</ThreadPrimitive.Messages>
         </div>
