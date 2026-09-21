@@ -927,6 +927,22 @@ check(
     assistantPartsOrder.findIndex(p => p === 'tool') > 0 &&
     assistantPartsOrder.findIndex(p => p === 'tool') < assistantPartsOrder.length - 1
 )
+const assistantPartGaps = await page.evaluate(() => {
+  const msg = document.querySelector('.aui-msg-assistant')
+  if (!msg) return []
+  const parts = [...msg.querySelectorAll('.aui-reasoning, :scope .aui-msg-parts > .aui-markdown, .tool-card')]
+  const gaps = []
+  for (let i = 1; i < parts.length; i++) {
+    gaps.push(parts[i].getBoundingClientRect().top - parts[i - 1].getBoundingClientRect().bottom)
+  }
+  return gaps
+})
+check(
+  'assistant part spacing is uniform',
+  assistantPartGaps.length >= 2 &&
+    assistantPartGaps.every(g => Math.abs(g - assistantPartGaps[0]) < 1.5) &&
+    Math.abs(assistantPartGaps[0] - 10) < 1.5
+)
 
 // scroll-to-bottom button: hidden at the bottom, appears once the user scrolls up
 // wait for the ping run to complete (composer back to "Envoyer")

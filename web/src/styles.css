@@ -1010,14 +1010,18 @@ button, input, textarea, select {
 .aui-markdown table { border-collapse: collapse; margin: 0.5em 0; }
 .aui-markdown th, .aui-markdown td { border: 1px solid var(--border); padding: 4px 8px; }
 
-.aui-chain { display: flex; flex-direction: column; gap: 10px; }
-.aui-tool-group { display: flex; flex-direction: column; gap: 6px; }
+.aui-msg-parts,
+.aui-chain,
+.aui-tool-group {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
 
 .aui-reasoning {
   border: 1px dashed var(--border);
   border-radius: 8px;
   background: var(--panel-2);
-  margin: 4px 0;
 }
 
 .aui-reasoning-summary {

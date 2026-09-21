@@ -92,32 +92,34 @@ function AuiUserMessage(): ReactNode {
 function AuiAssistantMessage({ onOpenFile }: { onOpenFile: (path: string) => void }): ReactNode {
   return (
     <MessagePrimitive.Root className="aui-msg aui-msg-assistant" data-role="assistant">
-      <MessagePrimitive.GroupedParts groupBy={GROUP}>
-        {({ part, children }: any) => {
-          switch (part.type) {
-            case 'group-chainOfThought':
-              return <div className="aui-chain">{children}</div>
-            case 'group-tool':
-              return <div className="aui-tool-group">{children}</div>
-            case 'group-reasoning':
-              return <AuiReasoningGroup>{children}</AuiReasoningGroup>
-            case 'text':
-              return <MessagePartPrimitive.Text component={AuiMarkdown as any} />
-            case 'reasoning':
-              return <AuiReasoningText />
-            case 'tool-call':
-              return part.toolUI ?? <AuiToolCard part={part} onOpenFile={onOpenFile} />
-            case 'indicator':
-              return (
-                <span className="aui-indicator" aria-label="Agent en cours">
-                  ●
-                </span>
-              )
-            default:
-              return null
-          }
-        }}
-      </MessagePrimitive.GroupedParts>
+      <div className="aui-msg-parts">
+        <MessagePrimitive.GroupedParts groupBy={GROUP}>
+          {({ part, children }: any) => {
+            switch (part.type) {
+              case 'group-chainOfThought':
+                return <div className="aui-chain">{children}</div>
+              case 'group-tool':
+                return <div className="aui-tool-group">{children}</div>
+              case 'group-reasoning':
+                return <AuiReasoningGroup>{children}</AuiReasoningGroup>
+              case 'text':
+                return <MessagePartPrimitive.Text component={AuiMarkdown as any} />
+              case 'reasoning':
+                return <AuiReasoningText />
+              case 'tool-call':
+                return part.toolUI ?? <AuiToolCard part={part} onOpenFile={onOpenFile} />
+              case 'indicator':
+                return (
+                  <span className="aui-indicator" aria-label="Agent en cours">
+                    ●
+                  </span>
+                )
+              default:
+                return null
+            }
+          }}
+        </MessagePrimitive.GroupedParts>
+      </div>
       <div className="aui-message-footer">
         <ActionBarPrimitive.Root hideWhenRunning autohide="not-last" className="aui-action-bar">
           <ActionBarPrimitive.Copy asChild>
