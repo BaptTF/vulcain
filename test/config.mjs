@@ -14,6 +14,7 @@ const {
   lastGoodConfigPath
 } = await import('../server/src/config.ts')
 const { loadVulcainConfig } = await import('../pi-ext/src/providers.ts')
+const { buildPiModelsDoc } = await import('../server/src/pi-models.ts')
 
 const results = []
 function check(name, cond) {
@@ -71,6 +72,24 @@ resetConfigCache()
 fs.writeFileSync(lastGoodConfigPath(), JSON.stringify(valid) + '\n')
 const nonObject = loadConfig()
 check('load: non-object JSON uses last-good', nonObject.theme === 'light' && nonObject.workspaces[0]?.name === 'Notes')
+
+const modelsDoc = buildPiModelsDoc({
+  name: 'custom',
+  baseUrl: 'http://llm.test/v1',
+  api: 'openai-completions',
+  apiKey: 'test-key',
+  compat: { supportsDeveloperRole: false },
+  models: [{ id: 'test-model', reasoning: true }]
+})
+check('syncPiModels: copies provider compat into models.json', modelsDoc.providers.custom.compat?.supportsDeveloperRole === false)
+check('syncPiModels: keeps models list', modelsDoc.providers.custom.models[0]?.id === 'test-model')
+const withoutCompat = buildPiModelsDoc({
+  name: 'custom',
+  baseUrl: 'http://llm.test/v1',
+  api: 'openai-completions',
+  models: []
+})
+check('syncPiModels: omits compat when unset', !('compat' in withoutCompat.providers.custom))
 
 fs.rmSync(HOME, { recursive: true, force: true })
 
