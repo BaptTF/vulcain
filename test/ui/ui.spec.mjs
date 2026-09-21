@@ -1142,6 +1142,89 @@ for (let i = 0; i < 20; i++) {
 }
 check('second thread content restored after reload', secondRestored)
 
+// Escape stops a running agent the same way as the Stop button
+await sessionsBtn.click()
+await page.waitForTimeout(250)
+await page.locator('[data-testid="agent"] .aui-sessions button', { hasText: 'Nouvelle session' }).click()
+await page.waitForTimeout(300)
+await page.locator('[data-testid="agent"] .aui-composer-input').fill('slow esc-stop')
+await page.locator('[data-testid="agent"] .aui-composer-input').press('Enter')
+let stopVisible = false
+for (let i = 0; i < 20; i++) {
+  await page.waitForTimeout(100)
+  if (await page.locator('[data-testid="agent"] .aui-composer-actions .btn', { hasText: 'Stop' }).isVisible()) {
+    stopVisible = true
+    break
+  }
+}
+check('Stop button appears while the slow turn runs', stopVisible)
+await page.keyboard.press('Escape')
+let stoppedByEsc = false
+for (let i = 0; i < 20; i++) {
+  await page.waitForTimeout(150)
+  if (await page.locator('[data-testid="agent"] .aui-composer-actions .btn', { hasText: 'Envoyer' }).isVisible()) {
+    stoppedByEsc = true
+    break
+  }
+}
+check('Escape stops the running agent like Stop', stoppedByEsc)
+await page.waitForTimeout(2500)
+check(
+  'Escape abort does not let the slow turn finish',
+  !(await page.locator('[data-testid="agent"] .aui-markdown').allTextContents()).join('\n').includes('après lecture')
+)
+await page.locator('[data-sonner-toast] button').filter({ hasText: /^×$|^Close$|^Fermer$/ }).first().click({ timeout: 500 }).catch(() => {})
+await page.keyboard.press('Escape')
+
+// switching workspace while the agent is answering must not drop the session:
+// the turn continues in the background and a toast opens the right thread
+await sessionsBtn.click()
+await page.waitForTimeout(250)
+await page.locator('[data-testid="agent"] .aui-sessions button', { hasText: 'Nouvelle session' }).click()
+await page.waitForTimeout(300)
+await page.locator('[data-testid="agent"] .aui-composer-input').fill('slow ping')
+await page.locator('[data-testid="agent"] .aui-composer-input').press('Enter')
+await page.waitForTimeout(250)
+const switcherBtn = page.locator('.topbar .btn', { hasText: '▾' }).first()
+await switcherBtn.click()
+await page.waitForTimeout(300)
+await page.locator('.ws-menu .ws-menu-item', { hasText: 'Config' }).first().click()
+await page.waitForTimeout(400)
+check(
+  'workspace switcher moved to Config while agent is answering',
+  /config/i.test((await switcherBtn.textContent()) ?? '')
+)
+const doneToast = page.locator('[data-sonner-toast]', { hasText: 'slow ping' })
+let toastSeen = false
+for (let i = 0; i < 40; i++) {
+  await page.waitForTimeout(250)
+  if (await doneToast.isVisible()) {
+    toastSeen = true
+    break
+  }
+}
+check('toast appears when a background session finishes', toastSeen)
+if (toastSeen) await doneToast.getByRole('button', { name: 'Ouvrir' }).click()
+let backOnNotes = false
+for (let i = 0; i < 20; i++) {
+  await page.waitForTimeout(250)
+  if (/notes/i.test((await switcherBtn.textContent()) ?? '')) {
+    backOnNotes = true
+    break
+  }
+}
+check('clicking the toast returns to the session workspace', backOnNotes)
+let backgroundRestored = false
+for (let i = 0; i < 20; i++) {
+  await page.waitForTimeout(300)
+  const text = (await page.locator('[data-testid="agent"] .aui-markdown').allTextContents()).join('\n')
+  if (text.includes('echo: slow ping') && text.includes('après lecture')) {
+    backgroundRestored = true
+    break
+  }
+}
+check('toast opens the session that finished in the background', backgroundRestored)
+
 // --- workspace selector: fast switcher + open-folder explorer ---
 const wsTrigger = page.locator('.topbar .btn', { hasText: '▾' }).first()
 const wsItem = text => page.locator('.ws-menu .ws-menu-item', { hasText: text }).first()

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Toaster } from 'sonner'
 import { getMeta, setTheme, type Meta } from './api'
 import { type Tab } from './components/EditorPane'
+import AgentToasts from './components/AgentToasts'
 import WorkspaceModal from './components/WorkspaceModal'
 import WorkspaceSwitcher from './components/WorkspaceSwitcher'
 import Workbench, { PANE_IDS, type PaneId, type WorkbenchHandle } from './components/Workbench'
@@ -55,6 +56,8 @@ export default function App() {
   const [tabs, setTabs] = useState<Tab[]>(() => tabsFromSaved(readSavedTabs(storedWorkspace())))
   const [activeTab, setActiveTab] = useState<string | null>(() => readSavedTabs(storedWorkspace()).active)
   const [wsModalOpen, setWsModalOpen] = useState(false)
+  const [sessionFocus, setSessionFocus] = useState<{ ws: string; sessionId: string } | null>(null)
+  const [activeSessionId, setActiveSessionId] = useState<string | undefined>(undefined)
   const flushRef = useRef<(() => void) | null>(null)
   const workbenchRef = useRef<WorkbenchHandle>(null)
 
@@ -151,6 +154,20 @@ export default function App() {
     getMeta().then(setMeta).catch(() => {})
   }, [applyWorkspace, activeWs, tabs, activeTab])
 
+  const openAgentSession = useCallback(
+    (workspace: string, sessionId: string) => {
+      if (workspace !== activeWs) applyWorkspace(workspace, { ws: activeWs, tabs, active: activeTab })
+      setSessionFocus({ ws: workspace, sessionId })
+    },
+    [applyWorkspace, activeWs, tabs, activeTab]
+  )
+
+  const onSessionFocusApplied = useCallback(() => setSessionFocus(null), [])
+
+  const onActiveThreadChange = useCallback((workspace: string, sessionId: string | undefined) => {
+    if (workspace === activeWs) setActiveSessionId(sessionId)
+  }, [activeWs])
+
   return (
     <div className="app">
       <Toaster
@@ -159,6 +176,7 @@ export default function App() {
         richColors
         closeButton
       />
+      <AgentToasts activeWs={activeWs} activeSessionId={activeSessionId} onOpen={openAgentSession} />
       <header className="topbar">
         <span className="logo">VULCAIN</span>
         <WorkspaceSwitcher activeWs={activeWs} onSelect={selectWorkspace} onOpenFolder={() => setWsModalOpen(true)} />
@@ -195,6 +213,9 @@ export default function App() {
           onClose={closeTab}
           onOpen={openFile}
           flushRef={flushRef}
+          sessionFocus={sessionFocus}
+          onSessionFocusApplied={onSessionFocusApplied}
+          onActiveThreadChange={onActiveThreadChange}
         />
       </div>
       <WorkspaceModal

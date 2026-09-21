@@ -212,12 +212,17 @@ button, input, textarea, select {
   display: none !important;
 }
 
+.panel-chat-stack,
 .panel-chat-host,
 .panel-tree,
 .panel-preview,
 .panel-chat {
   height: 100%;
   min-height: 0;
+}
+
+.panel-chat-stack > .panel-chat-host[hidden] {
+  display: none !important;
 }
 
 .panel-tree {

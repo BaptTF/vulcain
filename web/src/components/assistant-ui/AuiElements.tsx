@@ -11,6 +11,7 @@ import {
   useAuiState
 } from '@assistant-ui/react'
 import { useThreadTokenUsage } from '@assistant-ui/ai-sdk'
+import { abortChat } from '../../api'
 import { renderMarkdown } from '../../markdown'
 
 const GROUP = groupPartByType({
@@ -42,7 +43,7 @@ function toolTitle(toolName: string, args: unknown): string | undefined {
   return undefined
 }
 
-export function AuiThread({ onOpenFile }: { onOpenFile: (path: string) => void }): ReactNode {
+export function AuiThread({ onOpenFile, ws }: { onOpenFile: (path: string) => void; ws: string }): ReactNode {
   const scrollerRef = useRef<HTMLDivElement>(null)
   const [atBottom, setAtBottom] = useState(true)
   const onScroll = () => {
@@ -65,7 +66,7 @@ export function AuiThread({ onOpenFile }: { onOpenFile: (path: string) => void }
         </div>
       </div>
       <div className="aui-thread-footer">
-        <AuiComposer />
+        <AuiComposer ws={ws} />
         {!atBottom ? (
           <button className="aui-scroll-bottom" type="button" aria-label="Descendre en bas" onClick={jumpBottom}>
             ↓
@@ -251,8 +252,9 @@ function AuiToolCard({ part, onOpenFile }: { part: AuiToolPart; onOpenFile: (pat
   )
 }
 
-function AuiComposer(): ReactNode {
+function AuiComposer({ ws }: { ws: string }): ReactNode {
   const isRunning = useAuiState((s: any) => s.thread.isRunning)
+  const remoteId = useAuiState((s: any) => s.threadListItem?.id ?? s.threadListItem?.remoteId)
   return (
     <ComposerPrimitive.Root className="aui-composer">
       <ComposerPrimitive.Input asChild autoFocus={false}>
@@ -265,7 +267,7 @@ function AuiComposer(): ReactNode {
       <div className="aui-composer-actions">
         {isRunning ? (
           <ComposerPrimitive.Cancel asChild>
-            <button type="button" className="btn danger">
+            <button type="button" className="btn danger" onClick={() => void abortChat(ws, remoteId)}>
               Stop
             </button>
           </ComposerPrimitive.Cancel>

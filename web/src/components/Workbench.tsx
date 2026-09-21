@@ -63,6 +63,9 @@ interface WorkbenchValue {
   flushRef: MutableRefObject<(() => void) | null>
   live: LiveDoc
   setLive: (doc: LiveDoc) => void
+  sessionFocus: { ws: string; sessionId: string } | null
+  onSessionFocusApplied: () => void
+  onActiveThreadChange: (ws: string, sessionId: string | undefined) => void
 }
 
 const WorkbenchContext = createContext<WorkbenchValue | null>(null)
@@ -108,10 +111,39 @@ function PreviewDock(_props: IDockviewPanelProps) {
 }
 
 function AgentDock(_props: IDockviewPanelProps) {
-  const { ws, onOpen } = useWorkbench()
+  const { ws, onOpen, sessionFocus, onSessionFocusApplied, onActiveThreadChange } = useWorkbench()
+  const [mounted, setMounted] = useState<string[]>(() => (ws ? [ws] : []))
+
+  useEffect(() => {
+    setMounted(prev => {
+      const next = new Set(prev)
+      if (ws) next.add(ws)
+      if (sessionFocus?.ws) next.add(sessionFocus.ws)
+      const arr = [...next]
+      if (arr.length === prev.length && arr.every((name, i) => name === prev[i])) return prev
+      return arr
+    })
+  }, [ws, sessionFocus])
+
   return (
-    <div className="panel-chat-host" data-testid="agent">
-      <Chat key={ws} ws={ws} onOpenFile={onOpen} />
+    <div className="panel-chat-stack">
+      {mounted.map(name => (
+        <div
+          key={name}
+          className="panel-chat-host"
+          hidden={name !== ws}
+          data-testid={name === ws ? 'agent' : undefined}
+        >
+          <Chat
+            ws={name}
+            visible={name === ws}
+            focusSessionId={sessionFocus?.ws === name ? sessionFocus.sessionId : undefined}
+            onFocusApplied={onSessionFocusApplied}
+            onActiveThreadChange={onActiveThreadChange}
+            onOpenFile={onOpen}
+          />
+        </div>
+      ))}
     </div>
   )
 }
@@ -337,10 +369,27 @@ interface Props {
   onClose: (path: string) => void
   onOpen: (path: string) => void
   flushRef: MutableRefObject<(() => void) | null>
+  sessionFocus: { ws: string; sessionId: string } | null
+  onSessionFocusApplied: () => void
+  onActiveThreadChange: (ws: string, sessionId: string | undefined) => void
 }
 
 const Workbench = forwardRef<WorkbenchHandle, Props>(function Workbench(
-  { ws, theme, panes, onPanesChange, tabs, activePath, onActivate, onClose, onOpen, flushRef },
+  {
+    ws,
+    theme,
+    panes,
+    onPanesChange,
+    tabs,
+    activePath,
+    onActivate,
+    onClose,
+    onOpen,
+    flushRef,
+    sessionFocus,
+    onSessionFocusApplied,
+    onActiveThreadChange
+  },
   ref
 ) {
   const apiRef = useRef<DockviewApi | null>(null)
@@ -414,9 +463,25 @@ const Workbench = forwardRef<WorkbenchHandle, Props>(function Workbench(
       onOpen,
       flushRef,
       live,
-      setLive
+      setLive,
+      sessionFocus,
+      onSessionFocusApplied,
+      onActiveThreadChange
     }),
-    [ws, tabs, activePath, onActivate, onClose, onOpen, flushRef, live, setLive]
+    [
+      ws,
+      tabs,
+      activePath,
+      onActivate,
+      onClose,
+      onOpen,
+      flushRef,
+      live,
+      setLive,
+      sessionFocus,
+      onSessionFocusApplied,
+      onActiveThreadChange
+    ]
   )
 
   const syncPanes = useCallback(

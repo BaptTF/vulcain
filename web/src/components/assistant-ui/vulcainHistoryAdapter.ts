@@ -5,55 +5,34 @@ import type {
   MessageFormatRepository,
   ThreadHistoryAdapter
 } from '@assistant-ui/react'
-
-export interface AsyncStorageLike {
-  getItem(key: string): Promise<string | null>
-  setItem(key: string, value: string): Promise<void>
-  removeItem(key: string): Promise<void>
-}
+import { getChatMessages, putChatMessages, type ChatMessageRepo } from '../../api'
 
 type GetAui = () => { threadListItem?: { getState?: () => { remoteId?: string | null } } }
 
-interface StoredEntry {
-  id: string
-  parent_id: string | null
-  format: string
-  content: Record<string, unknown>
-}
-
-interface StoredRepo {
-  headId?: string | null
-  messages: StoredEntry[]
-}
-
 class VulcainFormattedHistoryAdapter<TMessage> implements GenericThreadHistoryAdapter<TMessage> {
   constructor(
-    private readonly storage: AsyncStorageLike,
-    private readonly prefix: string,
+    private readonly ws: string,
     private readonly getAui: GetAui,
     private readonly format: MessageFormatAdapter<TMessage, Record<string, unknown>>
   ) {}
 
-  private key(): string | null {
+  private remoteId(): string | null {
     try {
-      const remoteId = this.getAui()?.threadListItem?.getState?.()?.remoteId
-      return remoteId ? `${this.prefix}messages:${remoteId}` : null
+      return this.getAui()?.threadListItem?.getState?.()?.remoteId ?? null
     } catch {
       return null
     }
   }
 
-  private async readRepo(key: string): Promise<StoredRepo> {
-    const raw = await this.storage.getItem(key)
-    if (!raw) return { messages: [] }
+  private async readRepo(id: string): Promise<ChatMessageRepo> {
     try {
-      const parsed = JSON.parse(raw)
-      if (parsed && Array.isArray(parsed.messages)) return parsed as StoredRepo
+      const repo = await getChatMessages(this.ws, id)
+      if (repo && Array.isArray(repo.messages)) return repo
     } catch {}
     return { messages: [] }
   }
 
-  private toEntry(item: MessageFormatItem<TMessage>): StoredEntry {
+  private toEntry(item: MessageFormatItem<TMessage>) {
     return {
       id: this.format.getId(item.message),
       parent_id: item.parentId,
@@ -63,40 +42,40 @@ class VulcainFormattedHistoryAdapter<TMessage> implements GenericThreadHistoryAd
   }
 
   async load(): Promise<MessageFormatRepository<TMessage>> {
-    const key = this.key()
-    if (!key) return { messages: [] }
-    const repo = await this.readRepo(key)
+    const id = this.remoteId()
+    if (!id) return { messages: [] }
+    const repo = await this.readRepo(id)
     return { headId: repo.headId, messages: repo.messages.map(entry => this.format.decode(entry)) }
   }
 
   async append(item: MessageFormatItem<TMessage>): Promise<void> {
-    const key = this.key()
-    if (!key) return
-    const repo = await this.readRepo(key)
+    const id = this.remoteId()
+    if (!id) return
+    const repo = await this.readRepo(id)
     repo.messages.push(this.toEntry(item))
     repo.headId = this.format.getId(item.message)
-    await this.storage.setItem(key, JSON.stringify(repo))
+    await putChatMessages(this.ws, id, repo)
   }
 
   async update(item: MessageFormatItem<TMessage>, localMessageId?: string): Promise<void> {
-    const key = this.key()
-    if (!key) return
-    const repo = await this.readRepo(key)
-    const id = localMessageId ?? this.format.getId(item.message)
-    const idx = repo.messages.findIndex(m => m.id === id)
+    const id = this.remoteId()
+    if (!id) return
+    const repo = await this.readRepo(id)
+    const entryId = localMessageId ?? this.format.getId(item.message)
+    const idx = repo.messages.findIndex(m => m.id === entryId)
     if (idx >= 0) repo.messages[idx] = this.toEntry(item)
     else repo.messages.push(this.toEntry(item))
-    repo.headId = id
-    await this.storage.setItem(key, JSON.stringify(repo))
+    repo.headId = entryId
+    await putChatMessages(this.ws, id, repo)
   }
 
   async delete(items: MessageFormatItem<TMessage>[]): Promise<void> {
-    const key = this.key()
-    if (!key) return
-    const repo = await this.readRepo(key)
+    const id = this.remoteId()
+    if (!id) return
+    const repo = await this.readRepo(id)
     const ids = new Set(items.map(item => this.format.getId(item.message)))
     repo.messages = repo.messages.filter(m => !ids.has(m.id))
-    await this.storage.setItem(key, JSON.stringify(repo))
+    await putChatMessages(this.ws, id, repo)
   }
 
   pin(): void {}
@@ -105,14 +84,12 @@ class VulcainFormattedHistoryAdapter<TMessage> implements GenericThreadHistoryAd
 }
 
 /**
- * Persists chat history to localStorage, keyed by thread remote id, in the
- * AI SDK message format. Implements `withFormat` which `useChatRuntime`
- * (via `useAISDKRuntime`) requires of its history adapter.
+ * Persists chat history on the server (`.sessions/<id>/ui.json`) in the AI SDK
+ * message format. Implements `withFormat` which `useChatRuntime` requires.
  */
 export class VulcainHistoryAdapter implements ThreadHistoryAdapter {
   constructor(
-    private readonly storage: AsyncStorageLike,
-    private readonly prefix: string,
+    private readonly ws: string,
     private readonly getAui: GetAui
   ) {}
 
@@ -120,8 +97,7 @@ export class VulcainHistoryAdapter implements ThreadHistoryAdapter {
     formatAdapter: MessageFormatAdapter<TMessage, TStorageFormat>
   ): GenericThreadHistoryAdapter<TMessage> {
     return new VulcainFormattedHistoryAdapter(
-      this.storage,
-      this.prefix,
+      this.ws,
       this.getAui,
       formatAdapter as MessageFormatAdapter<TMessage, Record<string, unknown>>
     ) as GenericThreadHistoryAdapter<TMessage>

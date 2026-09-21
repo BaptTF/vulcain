@@ -3,6 +3,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { expandHome, type VulcainConfig } from './config.js'
 import { buildPiModelsDoc, type PiProviderConfig } from './pi-models.js'
+import { SESSIONS_PROMPT } from './sessions.js'
 
 export function piAgentDir(): string {
   return process.env.PI_CODING_AGENT_DIR || path.join(os.homedir(), '.pi', 'agent')
@@ -20,7 +21,11 @@ export function syncSystemPrompt(cfg: VulcainConfig): string | undefined {
   const dir = piAgentDir()
   fs.mkdirSync(dir, { recursive: true })
   const file = path.join(dir, 'SYSTEM.md')
-  fs.copyFileSync(src, file)
+  let text = fs.readFileSync(src, 'utf8')
+  if (!text.includes('.sessions/')) {
+    text = `${text.trimEnd()}\n\n${SESSIONS_PROMPT}\n`
+  }
+  fs.writeFileSync(file, text)
   return file
 }
 

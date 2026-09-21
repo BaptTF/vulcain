@@ -140,7 +140,9 @@ await new Promise(r => setTimeout(r, 800))
   const { default: os } = await import('node:os')
   const { default: path } = await import('node:path')
   const agentDir = process.env.PI_CODING_AGENT_DIR || path.join(os.homedir(), '.pi', 'agent')
+  const systemMd = fs.readFileSync(path.join(agentDir, 'SYSTEM.md'), 'utf8')
   check('chat: SYSTEM.md synced to pi agent dir', fs.existsSync(path.join(agentDir, 'SYSTEM.md')))
+  check('chat: SYSTEM.md documents .sessions transcripts', systemMd.includes('.sessions/'))
 }
 
 const stream = await withTimeout(
@@ -202,7 +204,21 @@ const listed = (sessionsList.body?.sessions ?? []).map(s => s.id)
 check('chat: sessions endpoint lists both thread ids', sessionsList.status === 200 && listed.includes('sess-a') && listed.includes('sess-b'))
 check(
   'chat: sessions titles derive from first prompt',
-  sessionsList.body?.sessions?.some(s => s.id === 'sess-a' && s.title === 'echo: hello a')
+  sessionsList.body?.sessions?.some(s => s.id === 'sess-a' && s.title === 'hello a')
+)
+
+const sessAMessages = await reqJson('GET', '/api/chat/sessions/sess-a/messages?workspace=Notes')
+check(
+  'chat: session messages are stored on the server',
+  sessAMessages.status === 200 &&
+    Array.isArray(sessAMessages.body?.messages) &&
+    sessAMessages.body.messages.some(m => JSON.stringify(m).includes('hello a'))
+)
+
+const sessAFile = await reqJson('GET', '/api/fs/file?ws=Notes&path=.sessions/sess-a/transcript.md')
+check(
+  'chat: transcript.md is written in the workspace',
+  sessAFile.status === 200 && typeof sessAFile.body?.content === 'string' && sessAFile.body.content.includes('hello a')
 )
 
 // reuse: a second message on the same thread increments its promptCount
@@ -210,6 +226,50 @@ await chatStream({ workspace: 'Notes', sessionId: 'sess-a', messages: [{ role: '
 const sessionsList2 = await reqJson('GET', '/api/chat/sessions?workspace=Notes')
 const sessAInfo = sessionsList2.body?.sessions?.find(s => s.id === 'sess-a')
 check('chat: same sessionId reuses the session (promptCount increments)', sessAInfo?.messageCount === 2)
+
+const deleted = await reqJson('DELETE', '/api/chat/sessions/sess-b?workspace=Notes')
+const afterDelete = await reqJson('GET', '/api/chat/sessions?workspace=Notes')
+const listedAfterDelete = (afterDelete.body?.sessions ?? []).map(s => s.id)
+check('chat: delete session removes it from the list', deleted.status === 200 && !listedAfterDelete.includes('sess-b') && listedAfterDelete.includes('sess-a'))
+
+function chatStreamEarlyClose(payload, ms) {
+  const body = JSON.stringify(payload)
+  return new Promise(resolve => {
+    const r = http.request(
+      {
+        host: '127.0.0.1',
+        port: PORT,
+        path: '/api/chat',
+        method: 'POST',
+        agent: false,
+        headers: { 'content-type': 'application/json', 'content-length': Buffer.byteLength(body) }
+      },
+      res => {
+        res.resume()
+      }
+    )
+    r.on('error', () => resolve())
+    r.end(body)
+    setTimeout(() => {
+      r.destroy()
+      resolve()
+    }, ms)
+  })
+}
+
+await chatStreamEarlyClose(
+  { workspace: 'Notes', sessionId: 'sess-slow', messages: [{ role: 'user', content: 'slow hello' }] },
+  200
+)
+await new Promise(r => setTimeout(r, 6000))
+const slowTranscript = await reqJson('GET', '/api/fs/file?ws=Notes&path=.sessions/sess-slow/transcript.md')
+check(
+  'chat: disconnect does not abort the agent; transcript is completed',
+  slowTranscript.status === 200 &&
+    typeof slowTranscript.body?.content === 'string' &&
+    slowTranscript.body.content.includes('echo: slow hello') &&
+    slowTranscript.body.content.includes('après lecture')
+)
 
 const commandsWithSession = await reqJson('GET', '/api/chat/commands?workspace=Notes&sessionId=sess-b')
 check(

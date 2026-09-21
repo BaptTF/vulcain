@@ -122,3 +122,73 @@ export function createWorkspace(name: string): Promise<void> {
 export function removeWorkspace(name: string): Promise<void> {
   return req(`/api/workspaces/${encodeURIComponent(name)}`, { method: 'DELETE' })
 }
+
+export interface ChatSessionInfo {
+  id: string
+  title?: string
+  modified: string
+  messageCount: number
+}
+
+export interface ChatSessionsList {
+  sessions: ChatSessionInfo[]
+  activeId?: string | null
+}
+
+export interface ChatMessageEntry {
+  id: string
+  parent_id: string | null
+  format: string
+  content: Record<string, unknown>
+}
+
+export interface ChatMessageRepo {
+  headId?: string | null
+  messages: ChatMessageEntry[]
+}
+
+export function listChatSessions(ws: string): Promise<ChatSessionsList> {
+  return req(`/api/chat/sessions?workspace=${encodeURIComponent(ws)}`)
+}
+
+export function upsertChatSession(
+  ws: string,
+  id: string,
+  patch?: { title?: string; status?: 'regular' | 'archived' }
+): Promise<{ session: ChatSessionInfo }> {
+  return req(`/api/chat/sessions/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    body: JSON.stringify({ workspace: ws, ...patch })
+  })
+}
+
+export function deleteChatSession(ws: string, id: string): Promise<void> {
+  return req(`/api/chat/sessions/${encodeURIComponent(id)}?workspace=${encodeURIComponent(ws)}`, {
+    method: 'DELETE'
+  })
+}
+
+export function getChatMessages(ws: string, id: string): Promise<ChatMessageRepo> {
+  return req(`/api/chat/sessions/${encodeURIComponent(id)}/messages?workspace=${encodeURIComponent(ws)}`)
+}
+
+export function putChatMessages(ws: string, id: string, repo: ChatMessageRepo): Promise<void> {
+  return req(`/api/chat/sessions/${encodeURIComponent(id)}/messages`, {
+    method: 'PUT',
+    body: JSON.stringify({ workspace: ws, headId: repo.headId ?? null, messages: repo.messages })
+  })
+}
+
+export function setActiveChatSession(ws: string, sessionId: string | null): Promise<void> {
+  return req('/api/chat/active', {
+    method: 'PUT',
+    body: JSON.stringify({ workspace: ws, sessionId })
+  })
+}
+
+export function abortChat(ws: string, sessionId?: string): Promise<void> {
+  return req('/api/chat/abort', {
+    method: 'POST',
+    body: JSON.stringify({ workspace: ws, sessionId })
+  })
+}
