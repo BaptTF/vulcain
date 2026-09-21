@@ -3,7 +3,6 @@ import {
   forwardRef,
   useCallback,
   useContext,
-  useEffect,
   useImperativeHandle,
   useMemo,
   useRef,
@@ -243,21 +242,10 @@ const Workbench = forwardRef<WorkbenchHandle, Props>(function Workbench(
   ref
 ) {
   const apiRef = useRef<DockviewApi | null>(null)
-  const hostRef = useRef<HTMLDivElement>(null)
   const persistTimer = useRef(0)
   const restoredRef = useRef(false)
   const [live, setLive] = useState<LiveDoc>({ path: null, text: '' })
   const initialPanes = useRef(panes)
-
-  const fitLayout = useCallback((api: DockviewApi) => {
-    const el = hostRef.current
-    if (!el) return
-    const { width, height } = el.getBoundingClientRect()
-    if (width < 8 || height < 8) return
-    if (api.width !== Math.round(width) || api.height !== Math.round(height)) {
-      api.layout(width, height)
-    }
-  }, [])
 
   const value = useMemo<WorkbenchValue>(
     () => ({
@@ -299,7 +287,6 @@ const Workbench = forwardRef<WorkbenchHandle, Props>(function Workbench(
       syncPanes(api)
       api.getPanel('editor')?.api.setActive()
       requestAnimationFrame(() => {
-        fitLayout(api)
         if (!restoredRef.current) applyDefaultSizes(api)
       })
       api.onDidLayoutChange(() => {
@@ -309,19 +296,8 @@ const Workbench = forwardRef<WorkbenchHandle, Props>(function Workbench(
       api.onDidAddPanel(() => syncPanes(api))
       api.onDidRemovePanel(() => syncPanes(api))
     },
-    [fitLayout, syncPanes]
+    [syncPanes]
   )
-
-  useEffect(() => {
-    const el = hostRef.current
-    if (!el) return
-    const ro = new ResizeObserver(() => {
-      const api = apiRef.current
-      if (api) fitLayout(api)
-    })
-    ro.observe(el)
-    return () => ro.disconnect()
-  }, [fitLayout])
 
   const dockTheme = useMemo(() => {
     const base = theme === 'light' ? themeLight : themeDark
@@ -334,12 +310,14 @@ const Workbench = forwardRef<WorkbenchHandle, Props>(function Workbench(
 
   return (
     <WorkbenchContext.Provider value={value}>
-      <div className="vulcain-dock" ref={hostRef}>
+      <div className="vulcain-dock">
         <DockviewReact
           theme={dockTheme}
           components={dockComponents}
           watermarkComponent={Watermark}
-          disableAutoResizing
+          // Panes are singletons toggled from the view bar; disable group DND
+          // so the tab-bar void next to a sash cannot steal a resize drag.
+          disableDnd
           getTabContextMenuItems={() => ['close', 'closeOthers', 'closeAll', 'maximize']}
           onReady={onReady}
         />

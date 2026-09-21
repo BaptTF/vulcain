@@ -122,41 +122,40 @@ check(
 if (editorSash && !topAtSash?.cls?.includes('dv-sash')) {
   console.log('  -> elementFromPoint at sash', JSON.stringify(topAtSash))
 }
+const floatingGroupCount = () => page.locator('.dv-render-overlay-float').count()
+
 if (editorSash) {
   const startW = beforeResize.editor?.w ?? 0
-  // dockview sashes listen to pointerdown/move/up, not a CSS resize handle
-  await page.evaluate(({ i, dx }) => {
+  // Dockview's sash listens to PointerEvents. Dispatch them on the sash
+  // (same path as a user drag) then wait long enough that a mid-drag
+  // api.layout() would have snapped the width back.
+  await page.evaluate(({ i, x, y, dx }) => {
     const sash = document.querySelectorAll('.dv-sash.dv-enabled')[i]
     if (!sash) return
-    const r = sash.getBoundingClientRect()
-    const x = r.left + r.width / 2
-    const y = r.top + r.height / 2
-    const fire = (target, type, cx, buttons) =>
+    const fire = (target, type, clientX) => {
       target.dispatchEvent(
         new PointerEvent(type, {
           bubbles: true,
           cancelable: true,
-          view: window,
-          clientX: cx,
-          clientY: y,
           pointerId: 1,
           pointerType: 'mouse',
-          isPrimary: true,
-          buttons,
-          button: 0
+          clientX,
+          clientY: y,
+          buttons: type === 'pointerup' ? 0 : 1
         })
       )
-    fire(sash, 'pointerdown', x, 1)
-    fire(document, 'pointermove', x + dx / 2, 1)
-    fire(document, 'pointermove', x + dx, 1)
-    fire(document, 'pointerup', x + dx, 0)
-  }, { i: editorSash.i, dx: 80 })
+    }
+    fire(sash, 'pointerdown', x)
+    fire(document, 'pointermove', x + dx / 2)
+    fire(document, 'pointermove', x + dx)
+    fire(document, 'pointerup', x + dx)
+  }, { i: editorSash.i, x: editorSash.x, y: editorSash.y, dx: 80 })
   await page.waitForTimeout(150)
   const justAfter = await paneBoxes()
-  await page.waitForTimeout(500) // persist timer is 200ms; catch snap-back
+  await page.waitForTimeout(600)
   const settled = await paneBoxes()
-  const grewJustAfter = (justAfter.editor?.w ?? 0) >= startW + 30
-  const stayedGrown = (settled.editor?.w ?? 0) >= startW + 30
+  const grewJustAfter = (justAfter.editor?.w ?? 0) >= startW + 40
+  const stayedGrown = (settled.editor?.w ?? 0) >= startW + 40
   const stable = Math.abs((settled.editor?.w ?? 0) - (justAfter.editor?.w ?? 0)) < 20
   editorGrew = grewJustAfter
   resizeStuck = grewJustAfter && stayedGrown && stable
@@ -176,8 +175,39 @@ if (editorSash) {
   }
 }
 check('dragging editor right sash widens the editor', editorGrew)
-check('editor resize sticks (no snap-back)', resizeStuck)
+check('editor resize sticks after a long drag (no snap-back)', resizeStuck)
 check('layout stays side by side after editor resize', stillRowAfterResize)
+check('long sash drag does not float a group', (await floatingGroupCount()) === 0)
+
+// dragging the editor tab-bar void (dockview's group drag handle, next to the sash)
+const editorVoid = page
+  .locator('.dv-groupview', { has: page.locator('[data-testid="editor"]') })
+  .locator('.dv-void-container')
+  .first()
+const headerBefore = await paneBoxes()
+if (await editorVoid.count()) {
+  const vb = await editorVoid.boundingBox()
+  if (vb) {
+    await page.mouse.move(vb.x + Math.max(vb.width - 6, 2), vb.y + vb.height / 2)
+    await page.mouse.down()
+    for (let i = 1; i <= 16; i++) {
+      await page.mouse.move(vb.x + vb.width + i * 16, vb.y + vb.height / 2)
+      await page.waitForTimeout(40)
+    }
+    await page.mouse.up()
+    await page.waitForTimeout(400)
+  }
+}
+const headerAfter = await paneBoxes()
+check('dragging the editor header does not float the group', (await floatingGroupCount()) === 0)
+check(
+  'dragging the editor header does not break the side-by-side row',
+  sideBySide(headerAfter)
+)
+check(
+  'dragging the editor header does not undock the editor',
+  (headerAfter.editor?.w ?? 0) > 40 && Math.abs((headerAfter.editor?.y ?? 0) - (headerBefore.editor?.y ?? 0)) < 40
+)
 
 const row = page.locator('[role="treeitem"]', { hasText: 'welcome.md' })
 check('file tree lists welcome.md', await row.first().isVisible())

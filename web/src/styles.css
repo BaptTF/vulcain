@@ -208,31 +208,6 @@ button, input, textarea, select {
   opacity: 1;
 }
 
-/* Sashes are 4px and sit under render overlays; make them actually grabbable. */
-.dockview-theme-vulcain .dv-sash-container {
-  pointer-events: none;
-}
-.dockview-theme-vulcain .dv-sash {
-  pointer-events: auto;
-  z-index: 1001;
-}
-.dockview-theme-vulcain .dv-horizontal > .dv-sash-container > .dv-sash.dv-enabled::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: -6px;
-  right: -6px;
-}
-.dockview-theme-vulcain .dv-vertical > .dv-sash-container > .dv-sash.dv-enabled::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: -6px;
-  bottom: -6px;
-}
-
 .panel-chat-host,
 .panel-tree,
 .panel-preview,
