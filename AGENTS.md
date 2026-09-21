@@ -29,6 +29,7 @@ File tree │ CodeMirror 6 editor (+ md/typst preview, PDF export) │ Agent cha
 ## Commands
 
 ```bash
+nix develop              # Node 22 + Playwright Chromium (NixOS)
 npm install
 npm run bootstrap        # scaffold ~/.vulcain/config/config.json + skills/, install pi extension
 npm run build            # build pi-ext, server, web
@@ -56,14 +57,18 @@ plus the fake chat backend (`VULCAIN_CHAT_BACKEND=fake`). It covers the editor (
 **autosave on typing**, **open-tab restoration across reload**), file tree, chat and
 workspace switcher.
 
-- **Native (fast path, when Chromium deps are available):** the runner bootstraps an
-  isolated env, starts the server (serves `web/dist` + API on one port) and runs the spec:
+Enter the Nix flake first on NixOS (`nix develop`, or direnv with `.envrc`):
+it provides Node 22 and Playwright's Chromium (`PLAYWRIGHT_BROWSERS_PATH`).
+`test/ui` Playwright must match the nixpkgs `playwright-driver` version.
+
+- **Native (`nix develop` / hosts with Chromium):** bootstraps an isolated env,
+  starts the server (serves `web/dist` + API on one port) and runs the spec:
 
   ```bash
   npm run test:ui     # node scripts/test-ui.mjs (VULCAIN_PORT / BASE_URL overridable)
   ```
 
-- **Docker (self-contained, works on hosts lacking Chromium libs, e.g. NixOS):**
+- **Docker (self-contained CI path, no Nix required):**
   `docker/Dockerfile.test` installs Playwright + Chromium deps and runs the same script:
 
   ```bash
@@ -72,8 +77,7 @@ workspace switcher.
 
   `scripts/test-ui.mjs` is the single source of truth for the test setup: fresh
   `VULCAIN_HOME`, `agent.command` pointed at the fake agent, a `Notes` workspace
-  with `welcome.md`, then server + spec. UI tests are run in CI-equivalent Docker
-  when Chromium isn't installed locally.
+  with `welcome.md`, then server + spec.
 
 ## Project rules
 
