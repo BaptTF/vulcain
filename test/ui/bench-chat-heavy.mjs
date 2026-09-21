@@ -142,33 +142,37 @@ await page.addInitScript(() => {
   } catch {}
 })
 
-async function openHeavy(expectedMsgs) {
+async function openHeavy(turns) {
   try {
     await page.evaluate(() => {
       window.__benchLongTasks = []
     })
   } catch {}
+  const needle = `Tour ${turns}:`
   const t0 = Date.now()
   await page.goto(BASE, { waitUntil: 'domcontentloaded' })
   await page.locator('.topbar .logo').waitFor({ timeout: 15000 })
   const deadline = Date.now() + 120000
-  let count = 0
+  let ready = false
   let lastLog = 0
   while (Date.now() < deadline) {
-    count = await page.evaluate(
-      () => document.querySelectorAll('[data-testid="agent"] .aui-msg').length
-    )
-    if (count >= expectedMsgs) break
+    ready = await page.evaluate(n => {
+      const agent = document.querySelector('[data-testid="agent"]')
+      if (!agent) return false
+      return [...agent.querySelectorAll('.aui-user-bubble')].some(el => (el.textContent || '').includes(n))
+    }, needle)
+    if (ready) break
     if (Date.now() - lastLog > 2000) {
-      console.log(`    waiting… ${count}/${expectedMsgs} messages at ${Date.now() - t0}ms`)
+      const mounted = await page.evaluate(
+        () => document.querySelectorAll('[data-testid="agent"] .aui-msg').length
+      )
+      console.log(`    waiting… last turn "${needle}" (mounted ${mounted}) at ${Date.now() - t0}ms`)
       lastLog = Date.now()
     }
     await page.waitForTimeout(250)
   }
   const openMs = Date.now() - t0
-  if (count < expectedMsgs) {
-    throw new Error(`only ${count}/${expectedMsgs} messages after ${openMs}ms`)
-  }
+  if (!ready) throw new Error(`last turn "${needle}" not in view after ${openMs}ms`)
   return { openMs }
 }
 
@@ -326,7 +330,7 @@ try {
   for (const turns of SCALES) {
     console.log(`\n== ${turns} turns (${turns * 2} messages) ==`)
     const stored = await seed(turns)
-    const { openMs } = await openHeavy(stored)
+    const { openMs } = await openHeavy(turns)
     const dom = await snapshotDom()
     const scroll = await measureScroll()
     const typing = await measureTyping()
@@ -359,7 +363,7 @@ try {
     }
     rows.push(row)
     console.log(
-      `  open=${fmt(openMs)}ms  msgs=${dom.messages}  nodes=${dom.nodes}  html=${dom.htmlKB}KB  overflow=${dom.scrollHeight - dom.clientHeight}px`
+      `  open=${fmt(openMs)}ms  mounted=${dom.messages}/${stored}  nodes=${dom.nodes}  html=${dom.htmlKB}KB  overflow=${dom.scrollHeight - dom.clientHeight}px`
     )
     console.log(
       `  scroll jumpTop=${fmt(scroll.jumpTopMs, 2)}ms jumpBottom=${fmt(scroll.jumpBottomMs, 2)}ms  rAF mean=${fmt(scroll.rafMsMean, 1)}ms p95=${fmt(scroll.rafMsP95, 1)}ms dropped>${24}ms: ${scroll.droppedFrames}`
@@ -367,9 +371,9 @@ try {
     console.log(
       `  type mean=${fmt(typing.meanMs, 1)}ms p95=${fmt(typing.p95Ms, 1)}ms max=${fmt(typing.maxMs, 1)}ms  longTasks=${longTasks.length}`
     )
-    if (dom.messages < stored) {
+    if (turns >= 80 && dom.messages >= stored / 2) {
       failed = true
-      console.log(`  FAIL expected ${stored} messages, got ${dom.messages}`)
+      console.log(`  FAIL virtualization: mounted ${dom.messages} of ${stored} messages`)
     }
   }
 } catch (err) {

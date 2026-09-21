@@ -1,4 +1,5 @@
-import { createContext, forwardRef, memo, useCallback, useContext, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { createContext, forwardRef, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useVirtualizer } from '@tanstack/react-virtual'
 import {
   ActionBarPrimitive,
   ComposerPrimitive,
@@ -43,87 +44,39 @@ function toolTitle(toolName: string, args: unknown): string | undefined {
   return undefined
 }
 
-export function AuiThread({
-  onOpenFile,
-  ws,
-  visible
-}: {
-  onOpenFile: (path: string) => void
-  ws: string
-  visible: boolean
-}): ReactNode {
-  const scrollerRef = useRef<HTMLDivElement>(null)
-  const [atBottom, setAtBottom] = useState(true)
-  const threadId = useAuiState((s: any) => s.threadListItem?.id)
-  const onScroll = () => {
-    const el = scrollerRef.current
-    if (!el) return
-    const next = el.scrollHeight - el.scrollTop - el.clientHeight <= 8
-    setAtBottom(prev => (prev === next ? prev : next))
+const OpenFileContext = createContext<(path: string) => void>(() => {})
+const AT_BOTTOM_THRESHOLD = 8
+const ESTIMATED_TURN_HEIGHT = 200
+
+type MessageRow = { id: string; role: string }
+type Turn = { id: string; messageIds: string[] }
+
+function buildTurns(messages: readonly MessageRow[]): Turn[] {
+  if (messages.length === 0) return []
+  const turns: Turn[] = []
+  for (const { id, role } of messages) {
+    const last = turns.at(-1)
+    if (role === 'user' || !last) turns.push({ id, messageIds: [id] })
+    else last.messageIds.push(id)
   }
-  const jumpBottom = () => {
-    const el = scrollerRef.current
-    if (!el) return
-    el.scrollTop = el.scrollHeight
-    setAtBottom(true)
-  }
-  // Hidden chats use display:none, so they stay at scrollTop 0 while messages
-  // accumulate. Pin to the end when the panel is shown or the thread changes.
-  useLayoutEffect(() => {
-    if (!visible) return
-    const el = scrollerRef.current
-    if (!el) return
-    let alive = true
-    const pin = () => {
-      if (!alive) return
-      el.scrollTop = el.scrollHeight
-      setAtBottom(true)
-    }
-    pin()
-    const id = requestAnimationFrame(() => {
-      pin()
-      requestAnimationFrame(pin)
-    })
-    const inner = el.querySelector('.aui-messages')
-    const ro = new ResizeObserver(pin)
-    if (inner) ro.observe(inner)
-    const t = window.setTimeout(() => ro.disconnect(), 800)
-    return () => {
-      alive = false
-      cancelAnimationFrame(id)
-      ro.disconnect()
-      window.clearTimeout(t)
-    }
-  }, [visible, threadId])
-  const renderMessage = useCallback(
-    () => <AuiMessage onOpenFile={onOpenFile} />,
-    [onOpenFile]
-  )
-  return (
-    <ThreadPrimitive.Root className="aui-thread">
-      <div className="aui-viewport" ref={scrollerRef} onScroll={onScroll}>
-        <div className="aui-messages">
-          <ThreadPrimitive.Messages>{renderMessage}</ThreadPrimitive.Messages>
-        </div>
-      </div>
-      <div className="aui-thread-footer">
-        <AuiComposer ws={ws} />
-        {!atBottom ? (
-          <button className="aui-scroll-bottom" type="button" aria-label="Descendre en bas" onClick={jumpBottom}>
-            ↓
-          </button>
-        ) : null}
-      </div>
-    </ThreadPrimitive.Root>
-  )
+  return turns
 }
 
-function AuiMessage({ onOpenFile }: { onOpenFile: (path: string) => void }): ReactNode {
-  const role = useAuiState((s: any) => s.message.role)
-  const isEditing = useAuiState((s: any) => s.message.composer.isEditing)
-  if (isEditing) return <AuiEditComposer />
-  if (role === 'user') return <AuiUserMessage />
-  return <AuiAssistantMessage onOpenFile={onOpenFile} />
+function useThreadMessageRows(): readonly MessageRow[] {
+  const prevRef = useRef<readonly MessageRow[]>([])
+  return useAuiState((s: any) => {
+    const messages = s.thread.messages as { id: string; role: string }[]
+    const prev = prevRef.current
+    if (
+      prev.length === messages.length &&
+      prev.every((row, i) => row.id === messages[i]?.id && row.role === messages[i]?.role)
+    ) {
+      return prev
+    }
+    const next = messages.map(({ id, role }) => ({ id, role }))
+    prevRef.current = next
+    return next
+  })
 }
 
 function AuiUserMessage(): ReactNode {
@@ -145,7 +98,8 @@ function AuiUserMessage(): ReactNode {
   )
 }
 
-function AuiAssistantMessage({ onOpenFile }: { onOpenFile: (path: string) => void }): ReactNode {
+function AuiAssistantMessage(): ReactNode {
+  const onOpenFile = useContext(OpenFileContext)
   return (
     <MessagePrimitive.Root className="aui-msg aui-msg-assistant" data-role="assistant">
       <div className="aui-msg-parts">
@@ -215,6 +169,164 @@ function AuiEditComposer(): ReactNode {
         </div>
       </ComposerPrimitive.Root>
     </MessagePrimitive.Root>
+  )
+}
+
+const MESSAGE_COMPONENTS = {
+  UserMessage: AuiUserMessage,
+  AssistantMessage: AuiAssistantMessage,
+  EditComposer: AuiEditComposer
+}
+
+export function AuiThread({
+  onOpenFile,
+  ws,
+  visible
+}: {
+  onOpenFile: (path: string) => void
+  ws: string
+  visible: boolean
+}): ReactNode {
+  const scrollerRef = useRef<HTMLDivElement>(null)
+  const contentRef = useRef<HTMLDivElement>(null)
+  const stickyRef = useRef(true)
+  const [atBottom, setAtBottom] = useState(true)
+  const threadId = useAuiState((s: any) => s.threadListItem?.id)
+  const isRunning = useAuiState((s: any) => s.thread.isRunning)
+  const rows = useThreadMessageRows()
+  const turns = useMemo(() => buildTurns(rows), [rows])
+
+  const virtualizer = useVirtualizer({
+    count: turns.length,
+    estimateSize: () => ESTIMATED_TURN_HEIGHT,
+    getItemKey: index => turns[index]?.id ?? index,
+    getScrollElement: () => scrollerRef.current,
+    overscan: 6,
+    scrollToFn: (offset, _options, instance) => {
+      const el = instance.scrollElement as HTMLElement | null
+      if (!el) return
+      if (stickyRef.current) {
+        const maxScroll = el.scrollHeight - el.clientHeight
+        if (maxScroll - el.scrollTop <= AT_BOTTOM_THRESHOLD && offset < maxScroll) return
+      }
+      el.scrollTo(0, offset)
+    }
+  })
+
+  const jumpBottom = useCallback(() => {
+    stickyRef.current = true
+    setAtBottom(true)
+    if (turns.length > 0) virtualizer.scrollToIndex(turns.length - 1, { align: 'end' })
+    requestAnimationFrame(() => {
+      const el = scrollerRef.current
+      if (el && stickyRef.current) el.scrollTop = el.scrollHeight
+    })
+  }, [turns.length, virtualizer])
+  const jumpBottomRef = useRef(jumpBottom)
+  jumpBottomRef.current = jumpBottom
+
+  useEffect(() => {
+    const el = scrollerRef.current
+    if (!el) return
+    let lastScrollTop = el.scrollTop
+    let lastScrollHeight = el.scrollHeight
+    let lastClientHeight = el.clientHeight
+    const onScroll = () => {
+      const next = el.scrollHeight - el.scrollTop - el.clientHeight <= AT_BOTTOM_THRESHOLD
+      if (next) stickyRef.current = true
+      else if (
+        el.scrollTop < lastScrollTop &&
+        el.scrollHeight === lastScrollHeight &&
+        Math.abs(el.clientHeight - lastClientHeight) <= 1
+      ) {
+        stickyRef.current = false
+      }
+      lastScrollTop = el.scrollTop
+      lastScrollHeight = el.scrollHeight
+      lastClientHeight = el.clientHeight
+      setAtBottom(prev => (prev === next ? prev : next))
+    }
+    const onWheel = (e: WheelEvent) => {
+      if (e.deltaY < 0) stickyRef.current = false
+    }
+    const onTouchMove = () => {
+      stickyRef.current = false
+    }
+    el.addEventListener('scroll', onScroll, { passive: true })
+    el.addEventListener('wheel', onWheel, { passive: true })
+    el.addEventListener('touchmove', onTouchMove, { passive: true })
+    return () => {
+      el.removeEventListener('scroll', onScroll)
+      el.removeEventListener('wheel', onWheel)
+      el.removeEventListener('touchmove', onTouchMove)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!visible) return
+    const el = scrollerRef.current
+    const content = contentRef.current
+    if (!el || !content) return
+    const observer = new ResizeObserver(() => {
+      if (stickyRef.current) el.scrollTop = el.scrollHeight
+    })
+    observer.observe(content)
+    return () => observer.disconnect()
+  }, [visible])
+
+  const prevRunning = useRef(false)
+  useLayoutEffect(() => {
+    if (isRunning && !prevRunning.current) jumpBottomRef.current()
+    prevRunning.current = isRunning
+  }, [isRunning])
+
+  useLayoutEffect(() => {
+    if (!visible) return
+    stickyRef.current = true
+    setAtBottom(true)
+    virtualizer.measure()
+    jumpBottomRef.current()
+  }, [visible, threadId])
+
+  const items = virtualizer.getVirtualItems()
+  const paddingTop = items[0]?.start ?? 0
+  const paddingBottom = Math.max(0, virtualizer.getTotalSize() - (items.at(-1)?.end ?? 0))
+
+  return (
+    <OpenFileContext.Provider value={onOpenFile}>
+      <ThreadPrimitive.Root className="aui-thread">
+        <div className="aui-viewport" ref={scrollerRef}>
+          <div className="aui-messages" ref={contentRef}>
+            <div style={{ paddingTop, paddingBottom }}>
+              {items.map(item => (
+                <div
+                  key={item.key}
+                  data-index={item.index}
+                  ref={virtualizer.measureElement}
+                  className="aui-turn"
+                >
+                  {turns[item.index]?.messageIds.map(messageId => (
+                    <ThreadPrimitive.Unstable_MessageById
+                      key={messageId}
+                      messageId={messageId}
+                      components={MESSAGE_COMPONENTS}
+                    />
+                  ))}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+        <div className="aui-thread-footer">
+          <AuiComposer ws={ws} />
+          {!atBottom ? (
+            <button className="aui-scroll-bottom" type="button" aria-label="Descendre en bas" onClick={jumpBottom}>
+              ↓
+            </button>
+          ) : null}
+        </div>
+      </ThreadPrimitive.Root>
+    </OpenFileContext.Provider>
   )
 }
 

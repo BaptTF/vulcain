@@ -945,18 +945,17 @@ button, input, textarea, select {
   min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
-  display: flex;
-  flex-direction: column;
 }
 
 .aui-viewport .aui-messages {
   padding: 12px 12px 0;
 }
 
-.aui-messages {
+.aui-turn {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  padding-bottom: 10px;
 }
 
 .aui-thread-footer {
