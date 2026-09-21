@@ -143,7 +143,9 @@ export default function FileTree({ ws, onOpen }: Props) {
     if (!el) return
     const ro = new ResizeObserver(entries => {
       const r = entries[0].contentRect
-      setSize({ w: Math.max(r.width, 100), h: Math.max(r.height, 100) })
+      const w = Math.max(Math.round(r.width), 100)
+      const h = Math.max(Math.round(r.height), 100)
+      setSize(prev => (prev.w === w && prev.h === h ? prev : { w, h }))
     })
     ro.observe(el)
     return () => ro.disconnect()

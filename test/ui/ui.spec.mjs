@@ -1,10 +1,27 @@
 import { chromium } from 'playwright'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 const BASE = process.env.BASE_URL || 'http://127.0.0.1:7399'
+const ONLY = process.env.UI_ONLY || ''
 const results = []
 const check = (name, cond) => {
   results.push(cond)
   console.log(`${cond ? 'PASS' : 'FAIL'} ${name}`)
+}
+const finish = async () => {
+  try {
+    await page.screenshot({
+      path: path.join(path.dirname(fileURLToPath(import.meta.url)), 'ui-result.png'),
+      fullPage: true
+    })
+  } catch {
+    // leftover root-owned artefact (e.g. from Docker) must not fail the suite
+  }
+  await browser.close()
+  const failed = results.filter(r => !r).length
+  console.log(`\n${results.length - failed}/${results.length} checks passed`)
+  process.exit(failed ? 1 : 0)
 }
 // a thread can hold several assistant messages; join all rendered markdown
 const threadText = async () => (await page.locator('.aui-markdown').allTextContents()).join('\n')
@@ -82,7 +99,8 @@ const sashRightOf = id =>
   }, id)
 
 await page.goto(BASE, { waitUntil: 'domcontentloaded' })
-await page.waitForTimeout(2500)
+if (ONLY === 'resize') await page.locator('.dv-dockview').first().waitFor({ timeout: 10000 })
+else await page.waitForTimeout(2500)
 
 const reactErrors = consoleErrors.filter(e => e.includes('Minified React error'))
 check('no minified React error (ex #130)', reactErrors.length === 0)
@@ -126,13 +144,16 @@ const floatingGroupCount = () => page.locator('.dv-render-overlay-float').count(
 
 if (editorSash) {
   const startW = beforeResize.editor?.w ?? 0
-  // Dockview's sash listens to PointerEvents. Dispatch them on the sash
-  // (same path as a user drag) then wait long enough that a mid-drag
-  // api.layout() would have snapped the width back.
-  await page.evaluate(({ i, x, y, dx }) => {
+  // Dockview sashes listen to PointerEvents on document. Playwright's mouse +
+  // waitForTimeout between moves drops that pointer (use mouse.move({ steps })
+  // for mouse splitters). Keep the whole drag in one gesture: sync moves, then
+  // hold the button down past persist debounce, then pointerup.
+  const held = await page.evaluate(async ({ i, x, y, dx }) => {
     const sash = document.querySelectorAll('.dv-sash.dv-enabled')[i]
-    if (!sash) return
-    const fire = (target, type, clientX) => {
+    const editor = document.querySelector('[data-testid="editor"]')
+    if (!sash || !editor) return { start: 0, afterSync: 0, mid: 0 }
+    const start = editor.getBoundingClientRect().width
+    const fire = (target, type, clientX, buttons) => {
       target.dispatchEvent(
         new PointerEvent(type, {
           bubbles: true,
@@ -141,30 +162,44 @@ if (editorSash) {
           pointerType: 'mouse',
           clientX,
           clientY: y,
-          buttons: type === 'pointerup' ? 0 : 1
+          buttons
         })
       )
     }
-    fire(sash, 'pointerdown', x)
-    fire(document, 'pointermove', x + dx / 2)
-    fire(document, 'pointermove', x + dx)
-    fire(document, 'pointerup', x + dx)
-  }, { i: editorSash.i, x: editorSash.x, y: editorSash.y, dx: 80 })
+    fire(sash, 'pointerdown', x, 1)
+    const steps = 12
+    for (let s = 1; s <= steps; s++) {
+      fire(document, 'pointermove', x + (dx * s) / steps, 1)
+    }
+    const afterSync = editor.getBoundingClientRect().width
+    const samples = [afterSync]
+    const t0 = performance.now()
+    while (performance.now() - t0 < 450) {
+      await new Promise(r => requestAnimationFrame(r))
+      samples.push(Math.round(editor.getBoundingClientRect().width))
+    }
+    const mid = editor.getBoundingClientRect().width
+    fire(document, 'pointerup', x + dx, 0)
+    return { start, afterSync, mid, samples: samples.filter((w, i, a) => i === 0 || w !== a[i - 1]) }
+  }, { i: editorSash.i, x: editorSash.x, y: editorSash.y, dx: 120 })
   await page.waitForTimeout(150)
   const justAfter = await paneBoxes()
   await page.waitForTimeout(600)
   const settled = await paneBoxes()
+  const grewSync = (held?.afterSync ?? 0) >= startW + 40
+  const heldWithoutSnap = (held?.mid ?? 0) >= startW + 40
   const grewJustAfter = (justAfter.editor?.w ?? 0) >= startW + 40
   const stayedGrown = (settled.editor?.w ?? 0) >= startW + 40
   const stable = Math.abs((settled.editor?.w ?? 0) - (justAfter.editor?.w ?? 0)) < 20
-  editorGrew = grewJustAfter
-  resizeStuck = grewJustAfter && stayedGrown && stable
+  editorGrew = grewSync && heldWithoutSnap && grewJustAfter
+  resizeStuck = editorGrew && stayedGrown && stable
   stillRowAfterResize = sideBySide(settled)
   if (!resizeStuck || !stillRowAfterResize) {
     console.log(
       '  -> resize',
       JSON.stringify({
         startW,
+        held,
         before: beforeResize,
         justAfter,
         settled,
@@ -178,6 +213,7 @@ check('dragging editor right sash widens the editor', editorGrew)
 check('editor resize sticks after a long drag (no snap-back)', resizeStuck)
 check('layout stays side by side after editor resize', stillRowAfterResize)
 check('long sash drag does not float a group', (await floatingGroupCount()) === 0)
+if (ONLY === 'resize') await finish()
 
 // dragging the editor tab-bar void (dockview's group drag handle, next to the sash)
 const editorVoid = page
@@ -371,9 +407,14 @@ await page.waitForTimeout(700) // watch debounce (250ms) + reload
 check('optimistic move source file listed', await page.locator('[role="treeitem"]', { hasText: moveFileName }).first().isVisible())
 
 // delay the rename endpoint: only an optimistic client-side move can nest the row this early
+let releaseRename
+const renameContinued = new Promise(r => {
+  releaseRename = r
+})
 await page.route('**/api/fs/rename', async route => {
   await new Promise(r => setTimeout(r, 1000))
   await route.continue()
+  releaseRename()
 })
 await dragStart(moveFileName)
 await dragHover(moveFileName, newFolderName)
@@ -391,8 +432,9 @@ for (let i = 0; i < 10; i++) {
   }
 }
 check('moved file appears nested before rename resolves (optimistic)', nestedFast)
+await renameContinued
 await page.unroute('**/api/fs/rename')
-await page.waitForTimeout(1500) // let the delayed rename land + watch reconcile
+await page.waitForTimeout(500) // watch reconcile after the delayed rename
 check('optimistic move reconciled on disk', await page.locator('[role="treeitem"]', { hasText: moveFileName }).first().isVisible())
 
 // bring welcome.md back to the foreground so the autosave test below targets it
@@ -1014,9 +1056,4 @@ await page.waitForTimeout(300)
 await wsItem('Notes').click()
 await page.waitForTimeout(400)
 
-await page.screenshot({ path: '/work/ui-result.png', fullPage: true })
-
-await browser.close()
-const failed = results.filter(r => !r).length
-console.log(`\n${results.length - failed}/${results.length} checks passed`)
-process.exit(failed ? 1 : 0)
+await finish()
