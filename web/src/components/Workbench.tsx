@@ -11,11 +11,14 @@ import {
   type MutableRefObject
 } from 'react'
 import {
+  DockviewDefaultTab,
   DockviewReact,
   themeDark,
   themeLight,
   type DockviewApi,
   type DockviewReadyEvent,
+  type GetTabContextMenuItemsParams,
+  type IDockviewPanelHeaderProps,
   type IDockviewPanelProps
 } from 'dockview-react'
 import FileTree from './FileTree'
@@ -121,15 +124,30 @@ function Watermark() {
   return <div className="empty-state">Réouvrez un panneau depuis la barre du haut</div>
 }
 
-const TAB_CONTEXT_MENU_ITEMS = ['close', 'closeOthers', 'closeAll', 'maximize'] as const
+const TAB_CONTEXT_MENU_ITEMS = ['closeOthers', 'closeAll', 'maximize'] as const
 
-function getTabContextMenuItems() {
-  return [...TAB_CONTEXT_MENU_ITEMS]
+type DockPanel = NonNullable<ReturnType<DockviewApi['getPanel']>>
+
+const hidePaneById: { current: (id: string) => void } = { current: () => {} }
+
+function HideTab(props: IDockviewPanelHeaderProps) {
+  return <DockviewDefaultTab {...props} closeActionOverride={() => hidePaneById.current(props.api.id)} />
+}
+
+function getTabContextMenuItems(params: GetTabContextMenuItemsParams) {
+  return [
+    { label: 'Hide', action: () => hidePaneById.current(params.panel.id) },
+    ...TAB_CONTEXT_MENU_ITEMS
+  ]
+}
+
+function isUserHidden(panel: DockPanel | undefined): boolean {
+  return panel?.params?.hidden === true
 }
 
 function paneIsShown(api: DockviewApi, id: PaneId): boolean {
   const panel = api.getPanel(id)
-  return !!panel && panel.api.group.api.isVisible
+  return !!panel && panel.api.group.api.isVisible && !isUserHidden(panel)
 }
 
 function panesFromApi(api: DockviewApi): Record<PaneId, boolean> {
@@ -173,19 +191,40 @@ function snapshotPaneSizes(api: DockviewApi, sizes: Partial<Record<PaneId, numbe
   }
 }
 
-function hideSingletonPane(
-  api: DockviewApi,
-  panel: NonNullable<ReturnType<DockviewApi['getPanel']>>,
-  sizes: Partial<Record<PaneId, number>>
-): void {
+function hidePane(panel: DockPanel): void {
+  panel.api.updateParameters({ hidden: true })
   const group = panel.api.group
-  if (group.panels.length > 1) {
-    snapshotPaneSizes(api, sizes)
-    writePaneSizes(sizes)
-    panel.api.close()
+  const shown = group.panels.filter(p => !isUserHidden(p))
+  if (shown.length === 0) {
+    group.api.setVisible(false)
     return
   }
-  group.api.setVisible(false)
+  const active = group.activePanel
+  if (!active || isUserHidden(active)) shown[0]?.api.setActive()
+}
+
+function showPane(panel: DockPanel): void {
+  panel.api.updateParameters({ hidden: undefined })
+  if (!panel.api.group.api.isVisible) panel.api.group.api.setVisible(true)
+  panel.api.setActive()
+}
+
+function applyUserHiddenState(api: DockviewApi): void {
+  for (const panel of api.panels) {
+    const hidden = isUserHidden(panel)
+    document.querySelectorAll(`.dv-tab[data-tab-panel-id="${panel.id}"]`).forEach(tab => {
+      tab.classList.toggle('vulcain-tab-hidden', hidden)
+    })
+  }
+  for (const group of api.groups) {
+    const shown = group.panels.filter(p => !isUserHidden(p))
+    if (shown.length === 0) {
+      if (group.api.isVisible) group.api.setVisible(false)
+      continue
+    }
+    const active = group.activePanel
+    if (active && isUserHidden(active)) shown[0]?.api.setActive()
+  }
 }
 
 function addPane(api: DockviewApi, id: PaneId, sizes: Partial<Record<PaneId, number>>): void {
@@ -381,43 +420,25 @@ const Workbench = forwardRef<WorkbenchHandle, Props>(function Workbench(
     [onPanesChange]
   )
 
-  useEffect(() => {
-    const onTabClose = (e: MouseEvent) => {
-      const t = e.target as HTMLElement | null
-      const action = t?.closest('.dv-default-tab-action')
-      if (!action) return
-      const api = apiRef.current
-      if (!api) return
-      const groupEl = action.closest('.dv-groupview')
-      const panel = api.panels.find(p => p.api.group.element === groupEl)
-      if (!panel || panel.api.group.panels.length > 1) return
-      e.preventDefault()
-      e.stopPropagation()
-      hideSingletonPane(api, panel, paneSizes.current)
-      syncPanes(api)
-    }
-    document.addEventListener('click', onTabClose, true)
-    return () => document.removeEventListener('click', onTabClose, true)
-  }, [syncPanes])
+  hidePaneById.current = (id: string) => {
+    const api = apiRef.current
+    if (!api) return
+    const panel = api.getPanel(id)
+    if (!panel || !paneIsShown(api, id as PaneId)) return
+    hidePane(panel)
+    applyUserHiddenState(api)
+    syncPanes(api)
+  }
 
   useImperativeHandle(ref, () => ({
     togglePane(id: PaneId) {
       const api = apiRef.current
       if (!api) return
       const panel = api.getPanel(id)
-      if (!panel) {
-        addPane(api, id, paneSizes.current)
-        syncPanes(api)
-        return
-      }
-      const group = panel.api.group
-      if (!group.api.isVisible) {
-        group.api.setVisible(true)
-        panel.api.setActive()
-        syncPanes(api)
-        return
-      }
-      hideSingletonPane(api, panel, paneSizes.current)
+      if (paneIsShown(api, id) && panel) hidePane(panel)
+      else if (panel) showPane(panel)
+      else addPane(api, id, paneSizes.current)
+      applyUserHiddenState(api)
       syncPanes(api)
     }
   }))
@@ -427,14 +448,17 @@ const Workbench = forwardRef<WorkbenchHandle, Props>(function Workbench(
       const api = event.api
       apiRef.current = api
       restoredRef.current = restoreLayout(api, initialPanes.current)
+      applyUserHiddenState(api)
       syncPanes(api)
-      api.getPanel('editor')?.api.setActive()
+      if (paneIsShown(api, 'editor')) api.getPanel('editor')?.api.setActive()
       requestAnimationFrame(() => {
         if (!restoredRef.current) applyDefaultSizes(api)
+        applyUserHiddenState(api)
         snapshotPaneSizes(api, paneSizes.current)
       })
       api.onDidLayoutChange(() => {
         snapshotPaneSizes(api, paneSizes.current)
+        applyUserHiddenState(api)
         schedulePersist()
         syncPanes(api)
       })
@@ -460,6 +484,7 @@ const Workbench = forwardRef<WorkbenchHandle, Props>(function Workbench(
           theme={dockTheme}
           components={dockComponents}
           watermarkComponent={Watermark}
+          defaultTabComponent={HideTab}
           getTabContextMenuItems={getTabContextMenuItems}
           onReady={onReady}
         />

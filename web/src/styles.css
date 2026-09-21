@@ -208,6 +208,10 @@ button, input, textarea, select {
   opacity: 1;
 }
 
+.vulcain-dock .dv-tab.vulcain-tab-hidden {
+  display: none !important;
+}
+
 .panel-chat-host,
 .panel-tree,
 .panel-preview,

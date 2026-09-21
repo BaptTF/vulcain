@@ -727,6 +727,104 @@ for (let i = 0; i < 16; i++) {
 }
 check('opening the sibling pdf uses the pdf viewer', editorPdf)
 
+// --- tab X hides in a shared tab group and the viewbar restores it there ---
+const paneTab = id => page.locator(`.dv-tab[data-tab-panel-id="${id}"]`).first()
+const tabsShareGroup = async (a, b) =>
+  page.evaluate(([x, y]) => {
+    const ta = document.querySelector(`.dv-tab[data-tab-panel-id="${x}"]`)
+    const tb = document.querySelector(`.dv-tab[data-tab-panel-id="${y}"]`)
+    if (!ta || !tb) return false
+    return ta.closest('.dv-groupview') === tb.closest('.dv-groupview')
+  }, [a, b])
+const tabHidden = async id =>
+  page.evaluate(panelId => {
+    const tab = document.querySelector(`.dv-tab[data-tab-panel-id="${panelId}"]`)
+    if (!tab) return true
+    const s = getComputedStyle(tab)
+    return s.display === 'none' || s.visibility === 'hidden' || tab.classList.contains('vulcain-tab-hidden')
+  }, id)
+const dockTabOnto = async (srcId, dstId) => {
+  const stacked = await page.evaluate(({ srcId, dstId }) => {
+    const src = document.querySelector(`.dv-tab[data-tab-panel-id="${srcId}"]`)
+    const dst = document.querySelector(`.dv-tab[data-tab-panel-id="${dstId}"]`)
+    if (!src || !dst) return false
+    const a = src.getBoundingClientRect()
+    const b = dst.getBoundingClientRect()
+    const from = { x: a.left + a.width / 2, y: a.top + a.height / 2 }
+    const to = { x: b.left + Math.min(8, b.width / 2), y: b.top + b.height / 2 }
+    const fire = (target, type, clientX, clientY, buttons) => {
+      target.dispatchEvent(
+        new PointerEvent(type, {
+          bubbles: true,
+          cancelable: true,
+          pointerId: 1,
+          pointerType: 'mouse',
+          clientX,
+          clientY,
+          buttons
+        })
+      )
+    }
+    fire(src, 'pointerdown', from.x, from.y, 1)
+    const steps = 16
+    for (let s = 1; s <= steps; s++) {
+      fire(
+        document,
+        'pointermove',
+        from.x + ((to.x - from.x) * s) / steps,
+        from.y + ((to.y - from.y) * s) / steps,
+        1
+      )
+    }
+    fire(dst, 'pointerup', to.x, to.y, 0)
+    fire(document, 'pointerup', to.x, to.y, 0)
+    const ta = document.querySelector(`.dv-tab[data-tab-panel-id="${srcId}"]`)
+    const tb = document.querySelector(`.dv-tab[data-tab-panel-id="${dstId}"]`)
+    return !!ta && !!tb && ta.closest('.dv-groupview') === tb.closest('.dv-groupview')
+  }, { srcId, dstId })
+  if (!stacked) {
+    const srcBox = await paneTab(srcId).boundingBox()
+    const dstBox = await paneTab(dstId).boundingBox()
+    if (srcBox && dstBox) {
+      await page.mouse.move(srcBox.x + srcBox.width / 2, srcBox.y + srcBox.height / 2)
+      await page.mouse.down()
+      await page.mouse.move(dstBox.x + Math.min(8, dstBox.width / 2), dstBox.y + dstBox.height / 2, {
+        steps: 16
+      })
+      await page.mouse.up()
+      await page.waitForTimeout(400)
+    }
+  } else {
+    await page.waitForTimeout(400)
+  }
+  return tabsShareGroup(srcId, dstId)
+}
+const editorOnPreview = await dockTabOnto('editor', 'preview')
+if (!editorOnPreview) {
+  console.log('  -> failed to dock editor onto preview as a tab')
+}
+check('editor can share a tab group with preview', editorOnPreview)
+if (editorOnPreview) {
+  await paneTab('editor').locator('.dv-default-tab-action').click()
+  await page.waitForTimeout(400)
+  check('tab X hides editor without leaving the shared group', await tabHidden('editor'))
+  check('preview stays visible after hiding editor in the shared group', await boxVisible('.panel-preview'))
+  check(
+    'editor toggle reflects hidden state in a shared group',
+    await paneToggle('Editor').evaluate(el => !el.classList.contains('active'))
+  )
+  await paneToggle('Editor').click()
+  await page.waitForTimeout(400)
+  check('editor tab returns to the same group as preview', await tabsShareGroup('editor', 'preview'))
+  check('editor tab is visible again after the viewbar toggle', !(await tabHidden('editor')))
+} else {
+  check('tab X hides editor without leaving the shared group', false)
+  check('preview stays visible after hiding editor in the shared group', false)
+  check('editor toggle reflects hidden state in a shared group', false)
+  check('editor tab returns to the same group as preview', false)
+  check('editor tab is visible again after the viewbar toggle', false)
+}
+
 // bring welcome.md back for the chat section below
 await page.locator('[role="treeitem"]', { hasText: 'welcome.md' }).first().click()
 await page.waitForTimeout(300)
