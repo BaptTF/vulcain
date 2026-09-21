@@ -412,9 +412,6 @@ const Workbench = forwardRef<WorkbenchHandle, Props>(function Workbench(
           theme={dockTheme}
           components={dockComponents}
           watermarkComponent={Watermark}
-          // Panes are singletons toggled from the view bar; disable group DND
-          // so the tab-bar void next to a sash cannot steal a resize drag.
-          disableDnd
           getTabContextMenuItems={getTabContextMenuItems}
           onReady={onReady}
         />

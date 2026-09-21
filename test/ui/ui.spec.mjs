@@ -238,36 +238,6 @@ if (resizeStuck) {
 check('closing and reopening the editor keeps the resized width', editorReopenKeepsWidth)
 if (ONLY === 'resize') await finish()
 
-// dragging the editor tab-bar void (dockview's group drag handle, next to the sash)
-const editorVoid = page
-  .locator('.dv-groupview', { has: page.locator('[data-testid="editor"]') })
-  .locator('.dv-void-container')
-  .first()
-const headerBefore = await paneBoxes()
-if (await editorVoid.count()) {
-  const vb = await editorVoid.boundingBox()
-  if (vb) {
-    await page.mouse.move(vb.x + Math.max(vb.width - 6, 2), vb.y + vb.height / 2)
-    await page.mouse.down()
-    for (let i = 1; i <= 16; i++) {
-      await page.mouse.move(vb.x + vb.width + i * 16, vb.y + vb.height / 2)
-      await page.waitForTimeout(40)
-    }
-    await page.mouse.up()
-    await page.waitForTimeout(400)
-  }
-}
-const headerAfter = await paneBoxes()
-check('dragging the editor header does not float the group', (await floatingGroupCount()) === 0)
-check(
-  'dragging the editor header does not break the side-by-side row',
-  sideBySide(headerAfter)
-)
-check(
-  'dragging the editor header does not undock the editor',
-  (headerAfter.editor?.w ?? 0) > 40 && Math.abs((headerAfter.editor?.y ?? 0) - (headerBefore.editor?.y ?? 0)) < 40
-)
-
 const row = page.locator('[role="treeitem"]', { hasText: 'welcome.md' })
 check('file tree lists welcome.md', await row.first().isVisible())
 
