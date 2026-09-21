@@ -383,13 +383,6 @@ button, input, textarea, select {
   padding: 0;
 }
 
-.preview-toolbar {
-  display: flex;
-  gap: 6px;
-  margin-left: auto;
-  align-items: center;
-}
-
 .typ-error {
   color: var(--danger);
   white-space: pre-wrap;

@@ -675,6 +675,7 @@ const waitForPdf = async marker => {
   return false
 }
 const typFound = await waitForPdf('Typst Page')
+check('compiler pdf button is absent', (await page.getByRole('button', { name: 'Compiler PDF' }).count()) === 0)
 check('typst preview renders a pdf page', typFound)
 if (typFound) {
   const cw = await previewPdf.locator('.pdf-scroll').evaluate(el => el.clientWidth)

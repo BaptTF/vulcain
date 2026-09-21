@@ -26,7 +26,6 @@ import { indentWithTab } from '@codemirror/commands'
 import { toast } from 'sonner'
 import { subscribeWatch } from '../watch-client'
 import * as api from '../api'
-import { bytesToBase64, siblingPdfPath, typstPdfBytes } from '../typst'
 import { NativePdfFrame } from './PdfViewer'
 import { MarkdownView, TypstView } from './Preview'
 
@@ -258,31 +257,10 @@ export default function EditorPane({
   )
 
   const content = activePath ? contents[activePath] ?? '' : ''
-  const isMd = !!activePath && /\.md$/i.test(activePath)
-  const isTyp = !!activePath && /\.typ$/i.test(activePath)
-  const previewable = isMd || isTyp
 
   useEffect(() => {
     onLiveChange?.(activePath, content)
   }, [activePath, content, onLiveChange])
-
-  const exportPdf = useCallback(async () => {
-    if (!activePath || !content) return
-    try {
-      const bytes = await typstPdfBytes(content)
-      const pdfPath = siblingPdfPath(activePath)
-      await api.writeFileBase64(ws, pdfPath, bytesToBase64(bytes))
-      const name = pdfPath.split('/').pop() ?? 'document.pdf'
-      const a = document.createElement('a')
-      a.href = api.downloadUrl(ws, pdfPath)
-      a.download = name
-      document.body.appendChild(a)
-      a.click()
-      a.remove()
-    } catch (e: any) {
-      toast.error('Compilation impossible', { description: String(e?.message ?? e) })
-    }
-  }, [ws, activePath, content])
 
   return (
     <>
@@ -307,15 +285,6 @@ export default function EditorPane({
             </button>
           </div>
         ))}
-        {previewable && (
-          <div className="preview-toolbar">
-            {isTyp && (
-              <button className="btn primary" onClick={exportPdf}>
-                Compiler PDF
-              </button>
-            )}
-          </div>
-        )}
       </div>
       {!activePath ? (
         <div className="empty-state">Ouvrez un fichier dans l'arbre à gauche</div>
