@@ -237,7 +237,14 @@ function newEntryId(prefix: string): string {
 
 export function mergeTurn(repo: StoredRepo, turn: TurnRecord): StoredRepo {
   const last = repo.messages[repo.messages.length - 1]
-  if (last && roleOf(last) === 'assistant') return repo
+  if (last && roleOf(last) === 'assistant') {
+    const prev = repo.messages[repo.messages.length - 2]
+    if (prev && roleOf(prev) === 'user' && textOf(prev) === turn.userText) {
+      last.content = { role: 'assistant', parts: turn.assistantParts }
+      repo.headId = last.id
+      return repo
+    }
+  }
 
   let parentId = last?.id ?? null
   if (!last || roleOf(last) !== 'user') {

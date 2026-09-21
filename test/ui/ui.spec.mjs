@@ -1114,12 +1114,16 @@ check('dropdown closes after selecting a session', (await sessionsDropdown.count
 
 // both threads persist across a full reload
 await page.reload({ waitUntil: 'domcontentloaded' })
-await page.waitForTimeout(1500)
+for (let i = 0; i < 40; i++) {
+  await page.waitForTimeout(250)
+  const status = (await page.locator('[data-testid="agent"] .chat-status').textContent()) ?? ''
+  if (/prêt|en cours|erreur/.test(status)) break
+}
 await sessionsBtn.click()
 await page.waitForTimeout(250)
 check('both threads listed after reload', (await page.locator('.aui-session-item').count()) === 2)
 let restoredAfterReload = false
-for (let i = 0; i < 20; i++) {
+for (let i = 0; i < 40; i++) {
   await page.waitForTimeout(300)
   const text = await threadText()
   if (text.includes('echo: ping')) {
@@ -1175,6 +1179,61 @@ check(
 )
 await page.locator('[data-sonner-toast] button').filter({ hasText: /^×$|^Close$|^Fermer$/ }).first().click({ timeout: 500 }).catch(() => {})
 await page.keyboard.press('Escape')
+await page.locator('[data-testid="agent"] .aui-composer-input').fill('after esc')
+await page.locator('[data-testid="agent"] .aui-composer-input').press('Enter')
+let afterEsc = false
+for (let i = 0; i < 20; i++) {
+  await page.waitForTimeout(250)
+  const text = (await page.locator('[data-testid="agent"] .aui-markdown').allTextContents()).join('\n')
+  if (text.includes('echo: after esc')) {
+    afterEsc = true
+    break
+  }
+}
+check('sending after Escape abort does not 409', afterEsc)
+
+// dropping the client stream (Stop without aborting the server) must not leave
+// the panel blank: session-done reloads the finished turn into the open thread
+await sessionsBtn.click()
+await page.waitForTimeout(250)
+await page.locator('[data-testid="agent"] .aui-sessions button', { hasText: 'Nouvelle session' }).click()
+await page.waitForTimeout(300)
+await page.locator('[data-testid="agent"] .aui-composer-input').fill('slow catch-up')
+await page.locator('[data-testid="agent"] .aui-composer-input').press('Enter')
+let catchStop = false
+for (let i = 0; i < 20; i++) {
+  await page.waitForTimeout(100)
+  if (await page.locator('[data-testid="agent"] .aui-composer-actions .btn', { hasText: 'Stop' }).isVisible()) {
+    catchStop = true
+    break
+  }
+}
+check('Stop is visible before dropping the client stream', catchStop)
+await page.locator('[data-sonner-toast] button').filter({ hasText: /^×$|^Close$|^Fermer$/ }).first().click({ timeout: 500 }).catch(() => {})
+await page.route('**/api/chat/abort', async route => {
+  await route.fulfill({ status: 200, contentType: 'application/json', body: '{"ok":true}' })
+})
+await page.locator('[data-testid="agent"] .aui-composer-actions .btn', { hasText: 'Stop' }).click({ force: true })
+let catchStopped = false
+for (let i = 0; i < 20; i++) {
+  await page.waitForTimeout(150)
+  if (await page.locator('[data-testid="agent"] .aui-composer-actions .btn', { hasText: 'Envoyer' }).isVisible()) {
+    catchStopped = true
+    break
+  }
+}
+check('Stop without server abort returns the composer to Envoyer', catchStopped)
+let catchUp = false
+for (let i = 0; i < 40; i++) {
+  await page.waitForTimeout(250)
+  const text = (await page.locator('[data-testid="agent"] .aui-markdown').allTextContents()).join('\n')
+  if (text.includes('echo: slow catch-up') && text.includes('après lecture')) {
+    catchUp = true
+    break
+  }
+}
+check('dropped stream still shows the finished turn in the panel', catchUp)
+await page.unroute('**/api/chat/abort')
 
 // switching workspace while the agent is answering must not drop the session:
 // the turn continues in the background and a toast opens the right thread

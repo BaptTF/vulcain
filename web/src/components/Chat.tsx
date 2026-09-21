@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AssistantRuntimeProvider, useAui, useAuiState, useRemoteThreadListRuntime } from '@assistant-ui/react'
-import { AssistantChatTransport, useAISDKError, useChatRuntime } from '@assistant-ui/ai-sdk'
+import { AssistantChatTransport, useAISDKChat, useAISDKError, useChatRuntime } from '@assistant-ui/ai-sdk'
 import { AuiSessionsPanel, AuiThread, AuiUsageBar } from './assistant-ui/AuiElements'
 import { VulcainHistoryAdapter } from './assistant-ui/vulcainHistoryAdapter'
 import { createServerThreadAdapter } from './assistant-ui/serverThreadAdapter'
-import { abortChat, listChatSessions, setActiveChatSession } from '../api'
+import { abortChat, getChatMessages, listChatSessions, setActiveChatSession, subscribeChatEvents } from '../api'
 
 interface Props {
   ws: string
@@ -62,12 +62,18 @@ export default function Chat({
   const [activeThreadId, setActiveThreadId] = useState<string | undefined>(undefined)
   const sessionsRef = useRef<HTMLDivElement>(null)
   const sessionsBtnRef = useRef<HTMLButtonElement>(null)
+  const restoredIdRef = useRef<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
+    restoredIdRef.current = null
     listChatSessions(ws)
       .then(list => {
-        if (!cancelled && list.activeId) setActiveThreadId(list.activeId)
+        if (cancelled) return
+        if (list.activeId) {
+          restoredIdRef.current = list.activeId
+          setActiveThreadId(list.activeId)
+        }
       })
       .catch(() => {})
     return () => {
@@ -123,14 +129,14 @@ export default function Chat({
     adapter,
     threadId: activeThreadId ?? undefined,
     onThreadIdChange: (id: string | undefined) => {
+      if (restoredIdRef.current) {
+        if (id !== restoredIdRef.current) return
+        restoredIdRef.current = null
+      }
       setActiveThreadId(id)
       if (id) void setActiveChatSession(ws, id)
     }
   })
-
-  const onStop = useCallback(() => {
-    void abortChat(ws, activeThreadId)
-  }, [ws, activeThreadId])
 
   return (
     <AssistantRuntimeProvider runtime={runtime}>
@@ -140,6 +146,7 @@ export default function Chat({
         sessionsOpen={sessionsOpen}
         onCloseSessions={() => setSessionsOpen(false)}
       />
+      <SessionCatchUp ws={ws} />
       <div className="panel-chat" data-testid="agent-chat" hidden={!visible}>
         <ChatHeader
           sessionsOpen={sessionsOpen}
@@ -151,6 +158,40 @@ export default function Chat({
       </div>
     </AssistantRuntimeProvider>
   )
+}
+
+function SessionCatchUp({ ws }: { ws: string }): null {
+  const sessionId = useAuiState((s: any) => s.threadListItem?.id ?? s.threadListItem?.remoteId)
+  const isRunning = useAuiState((s: any) => s.thread.isRunning)
+  const chat = useAISDKChat()
+  const sessionIdRef = useRef(sessionId)
+  sessionIdRef.current = sessionId
+  const isRunningRef = useRef(isRunning)
+  isRunningRef.current = isRunning
+  const chatRef = useRef(chat)
+  chatRef.current = chat
+
+  useEffect(() => {
+    return subscribeChatEvents(msg => {
+      if (msg.workspace !== ws || msg.sessionId !== sessionIdRef.current) return
+      if (isRunningRef.current) return
+      const helpers = chatRef.current
+      if (!helpers) return
+      void getChatMessages(ws, msg.sessionId)
+        .then(repo => {
+          if (!repo.messages.length) return
+          helpers.setMessages(
+            repo.messages.map(entry => ({
+              id: entry.id,
+              ...entry.content
+            })) as never
+          )
+        })
+        .catch(() => {})
+    })
+  }, [ws])
+
+  return null
 }
 
 function ChatEscape({

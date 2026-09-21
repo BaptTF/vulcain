@@ -3,13 +3,14 @@ import type { AgentSession, AgentSessionEvent } from '@earendil-works/pi-coding-
 import { createUIMessageStream, pipeUIMessageStreamToResponse } from 'ai'
 import fs from 'node:fs'
 import path from 'node:path'
-import type { FastifyInstance, FastifyRequest } from 'fastify'
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import { findWorkspace, loadConfig, type ResolvedWorkspace } from './config.js'
 import { piAgentDir } from './pisync.js'
 import {
   SessionIdError,
   persistCompletedTurn,
   readActive,
+  readMeta,
   readUi,
   rebuildTranscript,
   sessionPiDir,
@@ -361,6 +362,7 @@ class FakeChatSession implements ChatSession {
 
   async abort(): Promise<void> {
     this.aborted = true
+    this.streaming = false
   }
 
   subscribe(listener: (event: ChatSessionEvent) => void): () => void {
@@ -521,6 +523,167 @@ function lastUserText(body: ChatRequestBody): string | undefined {
 
 const SESSION_TTL_MS = 20 * 60 * 1000
 const SESSION_SWEEP_MS = 5 * 60 * 1000
+const HEARTBEAT_MS = 15_000
+
+interface LiveTurn {
+  session: ChatSession
+  turn: TurnBuilder
+  events: ChatSessionEvent[]
+  listeners: Set<(event: ChatSessionEvent) => void>
+  promptPromise: Promise<void>
+}
+
+async function streamLiveToReply(
+  reply: FastifyReply,
+  live: LiveTurn,
+  aborting: Set<string>,
+  key: string
+): Promise<void> {
+  const session = live.session
+  const stream = createUIMessageStream({
+    async execute({ writer }) {
+      const write = (part: Parameters<typeof writer.write>[0]): void => {
+        if (reply.raw.destroyed) return
+        try {
+          writer.write(part)
+        } catch {
+          // client gone; generation continues in the background
+        }
+      }
+      write({ type: 'start' })
+      const beat = setInterval(() => {
+        write({ type: 'message-metadata', messageMetadata: { custom: { keepalive: true } } })
+      }, HEARTBEAT_MS)
+      beat.unref()
+      let textId: string | undefined
+      let textContentIndex: number | undefined
+      let textSeq = 0
+      let reasoningId: string | undefined
+      let reasoningSeq = 0
+      let finished = false
+      const closeText = () => {
+        if (!textId) return
+        write({ type: 'text-end', id: textId })
+        textId = undefined
+        textContentIndex = undefined
+      }
+      const closeReasoning = () => {
+        if (!reasoningId) return
+        write({ type: 'reasoning-end', id: reasoningId })
+        reasoningId = undefined
+      }
+      const closeParts = () => {
+        closeReasoning()
+        closeText()
+      }
+      const ensureText = (contentIndex: number) => {
+        closeReasoning()
+        if (textId && textContentIndex !== contentIndex) closeText()
+        if (textId) return
+        textId = `text-${textSeq}`
+        textSeq += 1
+        textContentIndex = contentIndex
+        write({ type: 'text-start', id: textId })
+      }
+      const ensureReasoning = () => {
+        closeText()
+        if (reasoningId) return
+        reasoningId = `reasoning-${reasoningSeq}`
+        reasoningSeq += 1
+        write({ type: 'reasoning-start', id: reasoningId })
+      }
+      const finish = (outcome: 'completed' | 'failed' | 'aborted', error?: string) => {
+        if (finished) return
+        finished = true
+        closeParts()
+        if (outcome === 'completed') {
+          const { usage, contextUsage } = session.getUsage()
+          write({ type: 'message-metadata', messageMetadata: { custom: { usage, contextUsage } } })
+        }
+        try {
+          writer.setOutcome(
+            outcome === 'completed'
+              ? { status: 'completed' }
+              : outcome === 'aborted'
+                ? { status: 'aborted' }
+                : { status: 'failed', error }
+          )
+        } catch {}
+        if (outcome !== 'aborted') write({ type: 'finish', finishReason: outcome === 'failed' ? 'error' : 'stop' })
+      }
+      const handle = (event: ChatSessionEvent) => {
+        switch (event.type) {
+          case 'text_delta':
+            ensureText(event.contentIndex)
+            write({ type: 'text-delta', id: textId!, delta: event.delta })
+            break
+          case 'reasoning_delta':
+            ensureReasoning()
+            write({ type: 'reasoning-delta', id: reasoningId!, delta: event.delta })
+            break
+          case 'tool_call':
+            closeParts()
+            write({
+              type: 'tool-input-available',
+              toolCallId: event.toolCall.toolCallId,
+              toolName: event.toolCall.toolName,
+              input: event.toolCall.args,
+              toolMetadata: { title: event.toolCall.title, kind: event.toolCall.kind }
+            })
+            break
+          case 'tool_result':
+            if (event.toolCall.isError) {
+              write({
+                type: 'tool-output-error',
+                toolCallId: event.toolCall.toolCallId,
+                errorText: String(event.toolCall.result ?? 'tool error')
+              })
+            } else {
+              write({
+                type: 'tool-output-available',
+                toolCallId: event.toolCall.toolCallId,
+                output: event.toolCall.result
+              })
+            }
+            break
+          case 'error':
+            write({ type: 'error', errorText: event.message })
+            break
+          case 'done':
+            finish('completed')
+            break
+        }
+      }
+      const snapshot = live.events.slice()
+      for (const event of snapshot) handle(event)
+      live.listeners.add(handle)
+      for (let i = snapshot.length; i < live.events.length; i += 1) handle(live.events[i]!)
+      try {
+        await live.promptPromise
+        if (!finished) finish(aborting.has(key) ? 'aborted' : 'completed')
+      } catch (err) {
+        if (finished) return
+        const message = err instanceof Error ? err.message : String(err)
+        if (aborting.has(key)) {
+          finish('aborted')
+        } else {
+          write({ type: 'error', errorText: message })
+          finish('failed', message)
+        }
+      } finally {
+        clearInterval(beat)
+        live.listeners.delete(handle)
+      }
+    },
+    onError: (err: unknown) => (err instanceof Error ? err.message : String(err))
+  })
+
+  reply.hijack()
+  void pipeUIMessageStreamToResponse({ response: reply.raw, stream }).catch(() => {})
+  try {
+    await live.promptPromise
+  } catch {}
+}
 
 interface ChatDoneEvent {
   type: 'session-done'
@@ -532,10 +695,19 @@ interface ChatDoneEvent {
 export function registerChat(app: FastifyInstance, backend?: ChatBackend): void {
   const active = backend ?? (process.env.VULCAIN_CHAT_BACKEND === 'fake' ? new FakeChatBackend() : new PiChatBackend())
   const sessions = new Map<string, { chat: ChatSession; lastUsed: number }>()
+  const liveTurns = new Map<string, LiveTurn>()
   const aborting = new Set<string>()
   const eventClients = new Set<{ send: (data: string) => void; readyState: number; OPEN: number; on: (ev: string, fn: () => void) => void }>()
 
   const sessionKey = (wsName: string, threadId: string | undefined): string => `${wsName}:${threadId ?? ''}`
+
+  const dropSession = (key: string): void => {
+    liveTurns.delete(key)
+    const entry = sessions.get(key)
+    if (!entry) return
+    entry.chat.dispose()
+    sessions.delete(key)
+  }
 
   const broadcastDone = (event: ChatDoneEvent): void => {
     const payload = JSON.stringify(event)
@@ -597,22 +769,34 @@ export function registerChat(app: FastifyInstance, backend?: ChatBackend): void 
       return
     }
 
+    const threadId = request.body?.sessionId
+    const key = sessionKey(ws.name, threadId)
+    const reset = Boolean(request.body?.reset)
+
     let session: ChatSession
     try {
-      session = await getSession(ws, request.body?.sessionId, Boolean(request.body?.reset))
+      session = await getSession(ws, threadId, reset)
     } catch (err) {
       reply.code(500).send({ error: err instanceof Error ? err.message : String(err) })
       return
     }
 
-    if (session.isStreaming) {
-      reply.code(409).send({ error: 'agent already streaming' })
+    const inflight = liveTurns.get(key)
+    if (session.isStreaming && inflight) {
+      await streamLiveToReply(reply, inflight, aborting, key)
       return
     }
+    if (session.isStreaming) {
+      aborting.add(key)
+      try {
+        await session.abort()
+      } catch {}
+      dropSession(key)
+      session = await getSession(ws, threadId, false)
+    }
 
-    const threadId = request.body?.sessionId
-    const key = sessionKey(ws.name, threadId)
     aborting.delete(key)
+    const chat = session
     if (threadId) {
       try {
         upsertSession(ws.root, threadId, { streaming: true })
@@ -627,154 +811,21 @@ export function registerChat(app: FastifyInstance, backend?: ChatBackend): void 
 
     const turn = new TurnBuilder()
     turn.userText = text
-    const buffered: ChatSessionEvent[] = []
-    let forward: ((event: ChatSessionEvent) => void) | undefined
+    const events: ChatSessionEvent[] = []
+    const listeners = new Set<(event: ChatSessionEvent) => void>()
     const unsubAll = session.subscribe(event => {
       turn.apply(event)
-      if (forward) forward(event)
-      else buffered.push(event)
+      events.push(event)
+      for (const listener of listeners) listener(event)
     })
     const promptPromise = session.prompt(text).finally(() => unsubAll())
-
-    const stream = createUIMessageStream({
-      async execute({ writer }) {
-        const write = (part: Parameters<typeof writer.write>[0]): void => {
-          if (reply.raw.destroyed) return
-          try {
-            writer.write(part)
-          } catch {
-            // client gone; generation continues in the background
-          }
-        }
-        write({ type: 'start' })
-        let textId: string | undefined
-        let textContentIndex: number | undefined
-        let textSeq = 0
-        let reasoningId: string | undefined
-        let reasoningSeq = 0
-        let finished = false
-        const closeText = () => {
-          if (!textId) return
-          write({ type: 'text-end', id: textId })
-          textId = undefined
-          textContentIndex = undefined
-        }
-        const closeReasoning = () => {
-          if (!reasoningId) return
-          write({ type: 'reasoning-end', id: reasoningId })
-          reasoningId = undefined
-        }
-        const closeParts = () => {
-          closeReasoning()
-          closeText()
-        }
-        const ensureText = (contentIndex: number) => {
-          closeReasoning()
-          if (textId && textContentIndex !== contentIndex) closeText()
-          if (textId) return
-          textId = `text-${textSeq}`
-          textSeq += 1
-          textContentIndex = contentIndex
-          write({ type: 'text-start', id: textId })
-        }
-        const ensureReasoning = () => {
-          closeText()
-          if (reasoningId) return
-          reasoningId = `reasoning-${reasoningSeq}`
-          reasoningSeq += 1
-          write({ type: 'reasoning-start', id: reasoningId })
-        }
-        const finish = (outcome: 'completed' | 'failed' | 'aborted', error?: string) => {
-          if (finished) return
-          finished = true
-          closeParts()
-          if (outcome === 'completed') {
-            const { usage, contextUsage } = session.getUsage()
-            write({ type: 'message-metadata', messageMetadata: { custom: { usage, contextUsage } } })
-          }
-          try {
-            writer.setOutcome(
-              outcome === 'completed'
-                ? { status: 'completed' }
-                : outcome === 'aborted'
-                  ? { status: 'aborted' }
-                  : { status: 'failed', error }
-            )
-          } catch {}
-          if (outcome !== 'aborted') write({ type: 'finish', finishReason: outcome === 'failed' ? 'error' : 'stop' })
-        }
-        const handle = (event: ChatSessionEvent) => {
-          switch (event.type) {
-            case 'text_delta':
-              ensureText(event.contentIndex)
-              write({ type: 'text-delta', id: textId!, delta: event.delta })
-              break
-            case 'reasoning_delta':
-              ensureReasoning()
-              write({ type: 'reasoning-delta', id: reasoningId!, delta: event.delta })
-              break
-            case 'tool_call':
-              closeParts()
-              write({
-                type: 'tool-input-available',
-                toolCallId: event.toolCall.toolCallId,
-                toolName: event.toolCall.toolName,
-                input: event.toolCall.args,
-                toolMetadata: { title: event.toolCall.title, kind: event.toolCall.kind }
-              })
-              break
-            case 'tool_result':
-              if (event.toolCall.isError) {
-                write({
-                  type: 'tool-output-error',
-                  toolCallId: event.toolCall.toolCallId,
-                  errorText: String(event.toolCall.result ?? 'tool error')
-                })
-              } else {
-                write({
-                  type: 'tool-output-available',
-                  toolCallId: event.toolCall.toolCallId,
-                  output: event.toolCall.result
-                })
-              }
-              break
-            case 'error':
-              write({ type: 'error', errorText: event.message })
-              break
-            case 'done':
-              finish('completed')
-              break
-          }
-        }
-        forward = handle
-        for (const event of buffered) handle(event)
-
-        try {
-          await promptPromise
-          if (!finished) finish(aborting.has(key) ? 'aborted' : 'completed')
-        } catch (err) {
-          if (finished) return
-          const message = err instanceof Error ? err.message : String(err)
-          if (aborting.has(key)) {
-            finish('aborted')
-          } else {
-            write({ type: 'error', errorText: message })
-            finish('failed', message)
-          }
-        } finally {
-          if (forward === handle) forward = undefined
-        }
-      },
-      onError: (err: unknown) => (err instanceof Error ? err.message : String(err))
-    })
-
-    reply.hijack()
-    void pipeUIMessageStreamToResponse({ response: reply.raw, stream }).catch(() => {})
-    try {
-      await promptPromise
-    } catch {}
+    const live: LiveTurn = { session, turn, events, listeners, promptPromise }
+    liveTurns.set(key, live)
+    await streamLiveToReply(reply, live, aborting, key)
+    const stillCurrent = sessions.get(key)?.chat === chat
     const wasAborted = aborting.delete(key)
-    if (!wasAborted) await persistTurn(ws, threadId, turn.toTurn())
+    liveTurns.delete(key)
+    if (!wasAborted && stillCurrent) await persistTurn(ws, threadId, turn.toTurn())
     else if (threadId) {
       try {
         upsertSession(ws.root, threadId, { streaming: false })
@@ -815,7 +866,11 @@ export function registerChat(app: FastifyInstance, backend?: ChatBackend): void 
     await Promise.all(
       [...keys].map(async k => {
         const entry = sessions.get(k)
-        if (entry) await entry.chat.abort()
+        if (!entry) return
+        try {
+          await entry.chat.abort()
+        } catch {}
+        if (entry.chat.isStreaming) dropSession(k)
       })
     )
     reply.send({ ok: true })
@@ -910,8 +965,12 @@ export function registerChat(app: FastifyInstance, backend?: ChatBackend): void 
     }
     try {
       await withSessionLock(ws.root, id, () => {
+        if (readMeta(ws.root, id)?.streaming) return
+        const current = readUi(ws.root, id)
+        const incoming = body.messages as StoredRepo['messages']
+        if (current.messages.length > 0 && incoming.length < current.messages.length) return
         upsertSession(ws.root, id)
-        writeUi(ws.root, id, { headId: body.headId ?? null, messages: body.messages as StoredRepo['messages'] })
+        writeUi(ws.root, id, { headId: body.headId ?? null, messages: incoming })
         rebuildTranscript(ws.root, id)
       })
       reply.send({ ok: true })

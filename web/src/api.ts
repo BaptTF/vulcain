@@ -192,3 +192,47 @@ export function abortChat(ws: string, sessionId?: string): Promise<void> {
     body: JSON.stringify({ workspace: ws, sessionId })
   })
 }
+
+export type ChatDoneEvent = {
+  type: 'session-done'
+  workspace: string
+  sessionId: string
+  title?: string
+}
+
+const chatEventListeners = new Set<(event: ChatDoneEvent) => void>()
+let chatEventsSocket: WebSocket | undefined
+let chatEventsRetry: number | undefined
+
+function ensureChatEvents(): void {
+  if (chatEventsSocket) return
+  const protocol = location.protocol === 'https:' ? 'wss' : 'ws'
+  const socket = new WebSocket(`${protocol}://${location.host}/api/chat/events`)
+  chatEventsSocket = socket
+  socket.addEventListener('message', ev => {
+    let msg: ChatDoneEvent
+    try {
+      msg = JSON.parse(String(ev.data)) as ChatDoneEvent
+    } catch {
+      return
+    }
+    if (msg.type !== 'session-done' || !msg.workspace || !msg.sessionId) return
+    for (const listener of chatEventListeners) listener(msg)
+  })
+  socket.addEventListener('close', () => {
+    if (chatEventsSocket === socket) chatEventsSocket = undefined
+    if (chatEventsRetry !== undefined) return
+    chatEventsRetry = window.setTimeout(() => {
+      chatEventsRetry = undefined
+      if (chatEventListeners.size > 0) ensureChatEvents()
+    }, 2000)
+  })
+}
+
+export function subscribeChatEvents(listener: (event: ChatDoneEvent) => void): () => void {
+  chatEventListeners.add(listener)
+  ensureChatEvents()
+  return () => {
+    chatEventListeners.delete(listener)
+  }
+}

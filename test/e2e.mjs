@@ -271,6 +271,48 @@ check(
     slowTranscript.body.content.includes('après lecture')
 )
 
+const retryId = 'sess-abort-retry'
+const inflight = chatStream({
+  workspace: 'Notes',
+  sessionId: retryId,
+  messages: [{ role: 'user', content: 'slow abort-retry' }]
+})
+await new Promise(r => setTimeout(r, 250))
+const aborted = await reqJson('POST', '/api/chat/abort', { workspace: 'Notes', sessionId: retryId })
+check('chat: abort endpoint ok', aborted.status === 200)
+const afterAbort = await chatStream({
+  workspace: 'Notes',
+  sessionId: retryId,
+  messages: [{ role: 'user', content: 'hello after abort' }]
+})
+check(
+  'chat: prompt after abort does not 409',
+  afterAbort.status === 200 &&
+    afterAbort.chunks.some(c => c.type === 'finish') &&
+    afterAbort.chunks.some(c => JSON.stringify(c).includes('hello after abort'))
+)
+await inflight.catch(() => {})
+
+const overlapId = 'sess-overlap-continue'
+const overlapFirst = chatStream({
+  workspace: 'Notes',
+  sessionId: overlapId,
+  messages: [{ role: 'user', content: 'slow overlap first' }]
+})
+await new Promise(r => setTimeout(r, 250))
+const overlapContinue = await chatStream({
+  workspace: 'Notes',
+  sessionId: overlapId,
+  messages: [{ role: 'user', content: 'continue while streaming' }]
+})
+check(
+  'chat: prompt while already streaming attaches instead of 409',
+  overlapContinue.status === 200 &&
+    overlapContinue.chunks.some(c => c.type === 'finish') &&
+    overlapContinue.chunks.some(c => JSON.stringify(c).includes('slow overlap first'))
+)
+await overlapFirst.catch(() => {})
+
 const commandsWithSession = await reqJson('GET', '/api/chat/commands?workspace=Notes&sessionId=sess-b')
 check(
   'chat: commands endpoint works with sessionId param',
