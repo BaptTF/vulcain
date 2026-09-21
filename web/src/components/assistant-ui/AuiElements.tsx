@@ -1,4 +1,4 @@
-import { createContext, forwardRef, useContext, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { createContext, forwardRef, memo, useCallback, useContext, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   ActionBarPrimitive,
   ComposerPrimitive,
@@ -95,11 +95,15 @@ export function AuiThread({
       window.clearTimeout(t)
     }
   }, [visible, threadId])
+  const renderMessage = useCallback(
+    () => <AuiMessage onOpenFile={onOpenFile} />,
+    [onOpenFile]
+  )
   return (
     <ThreadPrimitive.Root className="aui-thread">
       <div className="aui-viewport" ref={scrollerRef} onScroll={onScroll}>
         <div className="aui-messages">
-          <ThreadPrimitive.Messages>{() => <AuiMessage onOpenFile={onOpenFile} />}</ThreadPrimitive.Messages>
+          <ThreadPrimitive.Messages>{renderMessage}</ThreadPrimitive.Messages>
         </div>
       </div>
       <div className="aui-thread-footer">
@@ -214,11 +218,11 @@ function AuiEditComposer(): ReactNode {
   )
 }
 
-function AuiMarkdown({ children }: { children?: ReactNode }): ReactNode {
+const AuiMarkdown = memo(function AuiMarkdown({ children }: { children?: ReactNode }): ReactNode {
   const text = typeof children === 'string' ? children : ''
-  const html = text ? renderMarkdown(text) : ''
+  const html = useMemo(() => (text ? renderMarkdown(text) : ''), [text])
   return <div className="md-body aui-markdown" dangerouslySetInnerHTML={{ __html: html }} />
-}
+})
 
 function AuiReasoningText(): ReactNode {
   const text = useAuiState((s: any) => (s.part?.type === 'reasoning' ? s.part.text : ''))
