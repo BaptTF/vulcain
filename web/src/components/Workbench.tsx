@@ -127,13 +127,17 @@ function getTabContextMenuItems() {
   return [...TAB_CONTEXT_MENU_ITEMS]
 }
 
+function paneIsShown(api: DockviewApi, id: PaneId): boolean {
+  const panel = api.getPanel(id)
+  return !!panel && panel.api.group.api.isVisible
+}
+
 function panesFromApi(api: DockviewApi): Record<PaneId, boolean> {
-  const open = new Set(api.panels.map(p => p.id))
   return {
-    tree: open.has('tree'),
-    editor: open.has('editor'),
-    preview: open.has('preview'),
-    agent: open.has('agent')
+    tree: paneIsShown(api, 'tree'),
+    editor: paneIsShown(api, 'editor'),
+    preview: paneIsShown(api, 'preview'),
+    agent: paneIsShown(api, 'agent')
   }
 }
 
@@ -167,6 +171,21 @@ function snapshotPaneSizes(api: DockviewApi, sizes: Partial<Record<PaneId, numbe
     const width = api.getPanel(id)?.api.width
     if (typeof width === 'number' && width >= 8) sizes[id] = Math.round(width)
   }
+}
+
+function hideSingletonPane(
+  api: DockviewApi,
+  panel: NonNullable<ReturnType<DockviewApi['getPanel']>>,
+  sizes: Partial<Record<PaneId, number>>
+): void {
+  const group = panel.api.group
+  if (group.panels.length > 1) {
+    snapshotPaneSizes(api, sizes)
+    writePaneSizes(sizes)
+    panel.api.close()
+    return
+  }
+  group.api.setVisible(false)
 }
 
 function addPane(api: DockviewApi, id: PaneId, sizes: Partial<Record<PaneId, number>>): void {
@@ -362,16 +381,44 @@ const Workbench = forwardRef<WorkbenchHandle, Props>(function Workbench(
     [onPanesChange]
   )
 
+  useEffect(() => {
+    const onTabClose = (e: MouseEvent) => {
+      const t = e.target as HTMLElement | null
+      const action = t?.closest('.dv-default-tab-action')
+      if (!action) return
+      const api = apiRef.current
+      if (!api) return
+      const groupEl = action.closest('.dv-groupview')
+      const panel = api.panels.find(p => p.api.group.element === groupEl)
+      if (!panel || panel.api.group.panels.length > 1) return
+      e.preventDefault()
+      e.stopPropagation()
+      hideSingletonPane(api, panel, paneSizes.current)
+      syncPanes(api)
+    }
+    document.addEventListener('click', onTabClose, true)
+    return () => document.removeEventListener('click', onTabClose, true)
+  }, [syncPanes])
+
   useImperativeHandle(ref, () => ({
     togglePane(id: PaneId) {
       const api = apiRef.current
       if (!api) return
       const panel = api.getPanel(id)
-      if (panel) {
-        snapshotPaneSizes(api, paneSizes.current)
-        writePaneSizes(paneSizes.current)
-        panel.api.close()
-      } else addPane(api, id, paneSizes.current)
+      if (!panel) {
+        addPane(api, id, paneSizes.current)
+        syncPanes(api)
+        return
+      }
+      const group = panel.api.group
+      if (!group.api.isVisible) {
+        group.api.setVisible(true)
+        panel.api.setActive()
+        syncPanes(api)
+        return
+      }
+      hideSingletonPane(api, panel, paneSizes.current)
+      syncPanes(api)
     }
   }))
 
@@ -389,6 +436,7 @@ const Workbench = forwardRef<WorkbenchHandle, Props>(function Workbench(
       api.onDidLayoutChange(() => {
         snapshotPaneSizes(api, paneSizes.current)
         schedulePersist()
+        syncPanes(api)
       })
       api.onDidAddPanel(() => syncPanes(api))
       api.onDidRemovePanel(() => syncPanes(api))

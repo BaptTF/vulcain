@@ -236,6 +236,48 @@ if (resizeStuck) {
   }
 }
 check('closing and reopening the editor keeps the resized width', editorReopenKeepsWidth)
+
+let siblingToggleKeepsEditor = false
+if (editorReopenKeepsWidth) {
+  const wide = (await paneBoxes()).editor?.w ?? 0
+  const agentToggle = page.locator('.viewbar .pane-toggle', { hasText: 'Agent' })
+  await agentToggle.click()
+  await page.waitForTimeout(350)
+  await agentToggle.click()
+  await page.waitForTimeout(400)
+  const afterAgent = await paneBoxes()
+  const w = afterAgent.editor?.w ?? 0
+  siblingToggleKeepsEditor = w >= startW + 40 && Math.abs(w - wide) < 24
+  if (!siblingToggleKeepsEditor) {
+    console.log('  -> editor after agent toggle', JSON.stringify({ startW, wide, afterAgent }))
+  }
+}
+check('toggling another pane does not reset the editor width', siblingToggleKeepsEditor)
+
+let editorTabXKeepsWidth = false
+if (siblingToggleKeepsEditor) {
+  const wide = (await paneBoxes()).editor?.w ?? 0
+  await page
+    .locator('.dv-tab', { hasText: 'Editor' })
+    .first()
+    .locator('.dv-default-tab-action')
+    .click()
+  await page.waitForTimeout(350)
+  const hidden = await page.evaluate(() => {
+    const n = document.querySelector('[data-testid="editor"]')
+    if (!n) return true
+    const g = n.closest('.dv-groupview')
+    return (g || n).getBoundingClientRect().width < 4
+  })
+  await page.locator('.viewbar .pane-toggle', { hasText: 'Editor' }).click()
+  await page.waitForTimeout(400)
+  const w = (await paneBoxes()).editor?.w ?? 0
+  editorTabXKeepsWidth = hidden && w >= startW + 40 && Math.abs(w - wide) < 24
+  if (!editorTabXKeepsWidth) {
+    console.log('  -> tab X reopen after resize', JSON.stringify({ startW, wide, hidden, w }))
+  }
+}
+check('closing the editor with the tab X then reopening keeps the resized width', editorTabXKeepsWidth)
 if (ONLY === 'resize') await finish()
 
 const row = page.locator('[role="treeitem"]', { hasText: 'welcome.md' })
@@ -522,9 +564,12 @@ const boxVisible = async sel => {
 }
 // a panel is "hidden" when its [data-panel] element is collapsed to zero width
 const panelHidden = async id => {
-  const el = page.locator(`[data-testid="${id}"]`).first()
-  if (!(await el.count())) return true
-  return !(await el.evaluate(n => n.getBoundingClientRect().width > 4))
+  return await page.evaluate(testId => {
+    const n = document.querySelector(`[data-testid="${testId}"]`)
+    if (!n) return true
+    const group = n.closest('.dv-groupview')
+    return (group || n).getBoundingClientRect().width < 4
+  }, id)
 }
 check('viewbar shows 4 pane toggles', (await page.locator('.viewbar .pane-toggle').count()) === 4)
 check(
