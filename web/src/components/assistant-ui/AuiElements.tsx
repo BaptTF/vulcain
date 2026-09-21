@@ -1,4 +1,4 @@
-import { createContext, forwardRef, useContext, useRef, useState, type ReactNode } from 'react'
+import { createContext, forwardRef, useContext, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import {
   ActionBarPrimitive,
   ComposerPrimitive,
@@ -43,9 +43,18 @@ function toolTitle(toolName: string, args: unknown): string | undefined {
   return undefined
 }
 
-export function AuiThread({ onOpenFile, ws }: { onOpenFile: (path: string) => void; ws: string }): ReactNode {
+export function AuiThread({
+  onOpenFile,
+  ws,
+  visible
+}: {
+  onOpenFile: (path: string) => void
+  ws: string
+  visible: boolean
+}): ReactNode {
   const scrollerRef = useRef<HTMLDivElement>(null)
   const [atBottom, setAtBottom] = useState(true)
+  const threadId = useAuiState((s: any) => s.threadListItem?.id)
   const onScroll = () => {
     const el = scrollerRef.current
     if (!el) return
@@ -58,6 +67,34 @@ export function AuiThread({ onOpenFile, ws }: { onOpenFile: (path: string) => vo
     el.scrollTop = el.scrollHeight
     setAtBottom(true)
   }
+  // Hidden chats use display:none, so they stay at scrollTop 0 while messages
+  // accumulate. Pin to the end when the panel is shown or the thread changes.
+  useLayoutEffect(() => {
+    if (!visible) return
+    const el = scrollerRef.current
+    if (!el) return
+    let alive = true
+    const pin = () => {
+      if (!alive) return
+      el.scrollTop = el.scrollHeight
+      setAtBottom(true)
+    }
+    pin()
+    const id = requestAnimationFrame(() => {
+      pin()
+      requestAnimationFrame(pin)
+    })
+    const inner = el.querySelector('.aui-messages')
+    const ro = new ResizeObserver(pin)
+    if (inner) ro.observe(inner)
+    const t = window.setTimeout(() => ro.disconnect(), 800)
+    return () => {
+      alive = false
+      cancelAnimationFrame(id)
+      ro.disconnect()
+      window.clearTimeout(t)
+    }
+  }, [visible, threadId])
   return (
     <ThreadPrimitive.Root className="aui-thread">
       <div className="aui-viewport" ref={scrollerRef} onScroll={onScroll}>

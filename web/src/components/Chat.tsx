@@ -147,7 +147,7 @@ export default function Chat({
           sessionsBtnRef={sessionsBtnRef}
         />
         {sessionsOpen && <AuiSessionsPanel ref={sessionsRef} onSelect={() => setSessionsOpen(false)} />}
-        <AuiThread onOpenFile={onOpenFile} ws={ws} />
+        <AuiThread onOpenFile={onOpenFile} ws={ws} visible={visible} />
       </div>
     </AssistantRuntimeProvider>
   )

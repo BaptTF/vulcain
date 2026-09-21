@@ -1182,7 +1182,9 @@ await sessionsBtn.click()
 await page.waitForTimeout(250)
 await page.locator('[data-testid="agent"] .aui-sessions button', { hasText: 'Nouvelle session' }).click()
 await page.waitForTimeout(300)
-await page.locator('[data-testid="agent"] .aui-composer-input').fill('slow ping')
+await page.locator('[data-testid="agent"] .aui-composer-input').fill(
+  'slow ping\n' + 'ligne pour déborder le fil du chat et vérifier le scroll.\n'.repeat(40)
+)
 await page.locator('[data-testid="agent"] .aui-composer-input').press('Enter')
 await page.waitForTimeout(250)
 const switcherBtn = page.locator('.topbar .btn', { hasText: '▾' }).first()
@@ -1224,6 +1226,20 @@ for (let i = 0; i < 20; i++) {
   }
 }
 check('toast opens the session that finished in the background', backgroundRestored)
+let scrolledToEnd = false
+for (let i = 0; i < 20; i++) {
+  await page.waitForTimeout(150)
+  const pos = await page.locator('[data-testid="agent"] .aui-viewport').evaluate(el => ({
+    top: el.scrollTop,
+    client: el.clientHeight,
+    height: el.scrollHeight
+  }))
+  if (pos.height > pos.client + 40 && pos.top + pos.client >= pos.height - 16) {
+    scrolledToEnd = true
+    break
+  }
+}
+check('toast opens the session scrolled to the end', scrolledToEnd)
 
 // --- workspace selector: fast switcher + open-folder explorer ---
 const wsTrigger = page.locator('.topbar .btn', { hasText: '▾' }).first()
