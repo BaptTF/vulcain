@@ -737,6 +737,12 @@ await page.keyboard.type('\nWATCH_PDF_MARKER')
 check('typst watch refreshes the pdf after an edit', await waitForPdf('WATCH_PDF_MARKER'))
 const scrolledAfter = await pdfScroll.evaluate(el => el.scrollTop)
 check('typst pdf keeps scroll after recompile', scrolled > 80 && Math.abs(scrolledAfter - scrolled) < 50)
+for (let i = 0; i < 6; i++) {
+  await page.keyboard.type(`\nLEAK_CANVAS_${i}`)
+  if (!(await waitForPdf(`LEAK_CANVAS_${i}`))) break
+}
+const canvasCount = await previewPdf.locator('.pdf-layer:not(.is-hidden) canvas').count()
+check('typst preview does not accumulate pdf canvases', canvasCount > 0 && canvasCount <= 8)
 
 await putFile('bad.typ', '#definitely_not_a_function[oops]\n')
 await page.waitForTimeout(600)

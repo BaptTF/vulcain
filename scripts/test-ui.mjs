@@ -60,7 +60,10 @@ const server = spawn('node', [path.join(repoRoot, 'server', 'dist', 'index.js')]
 let exitCode = 1
 try {
   await waitForServer(20000)
-  exitCode = await run('node', [path.join(repoRoot, 'test', 'ui', 'ui.spec.mjs')])
+  const spec = process.env.UI_SPEC
+    ? path.resolve(repoRoot, process.env.UI_SPEC)
+    : path.join(repoRoot, 'test', 'ui', 'ui.spec.mjs')
+  exitCode = await run('node', [spec])
 } catch (e) {
   console.error('[test-ui]', e.message)
 } finally {

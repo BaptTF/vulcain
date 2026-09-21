@@ -14,6 +14,7 @@
     "build": "npm run build -w pi-ext && npm run build -w server && npm run build -w web",
     "start": "npm run start -w server",
     "test:ui": "node scripts/test-ui.mjs",
+    "bench:typst-preview": "VULCAIN_HOME=/tmp/vulcain-typst-bench VULCAIN_PORT=7398 UI_SPEC=test/ui/bench-typst-preview.mjs node scripts/test-ui.mjs",
     "test:websearch": "node test/web-search.mjs",
     "test:config": "node test/config.mjs",
     "test:ui:docker": "docker build -f docker/Dockerfile.test -t vulcain-test . && docker run --rm vulcain-test",

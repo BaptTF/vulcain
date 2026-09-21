@@ -1,5 +1,6 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Document, Page } from 'react-pdf'
+import { stampPreview } from '../preview-trace'
 import '../pdf-worker'
 import 'react-pdf/dist/Page/AnnotationLayer.css'
 import 'react-pdf/dist/Page/TextLayer.css'
@@ -12,9 +13,6 @@ const PDF_OPTIONS = { disableFontFace: true, useSystemFonts: false }
 const MIN_SCALE = 0.4
 const MAX_SCALE = 3
 const SCALE_STEP = 0.1
-const PAGE_GAP = 12
-const OVERSCAN = 1
-const FALLBACK_PAGE_RATIO = 297 / 210
 
 type Layer = { id: number; data: Uint8Array }
 
@@ -27,14 +25,12 @@ export function NativePdfFrame({ src, title }: { src: string; title: string }) {
   return <iframe className="pdf-frame" data-testid="pdf-frame" src={src} title={title} />
 }
 
-function visibleRange(numPages: number, pageH: number, top: number, viewH: number): [number, number] {
-  if (numPages <= 0) return [1, 1]
-  const stride = Math.max(1, pageH + PAGE_GAP)
-  let first = Math.floor(Math.max(0, top) / stride) - OVERSCAN + 1
-  let last = Math.ceil((Math.max(0, top) + Math.max(viewH, stride)) / stride) + OVERSCAN
-  first = Math.min(numPages, Math.max(1, first))
-  last = Math.min(numPages, Math.max(first, last))
-  return [first, last]
+function releaseCanvases(root: HTMLElement | null) {
+  if (!root) return
+  for (const canvas of root.querySelectorAll('canvas')) {
+    canvas.width = 0
+    canvas.height = 0
+  }
 }
 
 export const PdfViewer = memo(function PdfViewer({ file }: { file: Uint8Array }) {
@@ -45,9 +41,7 @@ export const PdfViewer = memo(function PdfViewer({ file }: { file: Uint8Array })
   const nextId = useRef(0)
   const [width, setWidth] = useState(0)
   const [scale, setScale] = useState(1)
-  const [view, setView] = useState({ top: 0, height: 0 })
   const [buf, setBuf] = useState<PdfBuffer>({ visible: 0, slots: [null, null] })
-  const viewRaf = useRef(0)
 
   const rememberScroll = () => {
     const el = scrollRef.current
@@ -62,14 +56,6 @@ export const PdfViewer = memo(function PdfViewer({ file }: { file: Uint8Array })
     el.scrollLeft = scrollPos.current.left
   }
 
-  const syncView = useCallback(() => {
-    const el = scrollRef.current
-    if (!el) return
-    const top = el.scrollTop
-    const height = el.clientHeight
-    setView(prev => (prev.top === top && prev.height === height ? prev : { top, height }))
-  }, [])
-
   useEffect(() => {
     const el = hostRef.current
     if (!el) return
@@ -81,15 +67,6 @@ export const PdfViewer = memo(function PdfViewer({ file }: { file: Uint8Array })
     setWidth(el.clientWidth)
     return () => ro.disconnect()
   }, [])
-
-  useEffect(() => {
-    const el = scrollRef.current
-    if (!el) return
-    const ro = new ResizeObserver(() => syncView())
-    ro.observe(el)
-    syncView()
-    return () => ro.disconnect()
-  }, [syncView])
 
   useEffect(() => {
     const id = ++nextId.current
@@ -104,6 +81,7 @@ export const PdfViewer = memo(function PdfViewer({ file }: { file: Uint8Array })
 
   const onLayerReady = useCallback((id: number) => {
     if (id !== nextId.current) return
+    stampPreview('layerReady')
     rememberScroll()
     freezeScroll.current = true
     setBuf(prev => {
@@ -156,14 +134,7 @@ export const PdfViewer = memo(function PdfViewer({ file }: { file: Uint8Array })
       <div
         className="pdf-scroll"
         ref={scrollRef}
-        onScroll={() => {
-          rememberScroll()
-          if (viewRaf.current) return
-          viewRaf.current = requestAnimationFrame(() => {
-            viewRaf.current = 0
-            syncView()
-          })
-        }}
+        onScroll={() => rememberScroll()}
         onWheel={e => {
           if (!e.ctrlKey && !e.metaKey) return
           e.preventDefault()
@@ -178,8 +149,6 @@ export const PdfViewer = memo(function PdfViewer({ file }: { file: Uint8Array })
                   key={layer.id}
                   data={layer.data}
                   width={pageWidth}
-                  viewTop={freezeScroll.current ? scrollPos.current.top : view.top}
-                  viewHeight={view.height}
                   hidden={i !== buf.visible}
                   onReady={() => onLayerReady(layer.id)}
                 />
@@ -194,89 +163,63 @@ export const PdfViewer = memo(function PdfViewer({ file }: { file: Uint8Array })
 function PdfLayer({
   data,
   width,
-  viewTop,
-  viewHeight,
   hidden,
   onReady
 }: {
   data: Uint8Array
   width: number
-  viewTop: number
-  viewHeight: number
   hidden: boolean
   onReady: () => void
 }) {
+  const rootRef = useRef<HTMLDivElement>(null)
   const [numPages, setNumPages] = useState(0)
-  const [ratio, setRatio] = useState(FALLBACK_PAGE_RATIO)
   const numPagesRef = useRef(0)
   const rendered = useRef(new Set<number>())
   const readySent = useRef(false)
   const onReadyRef = useRef(onReady)
   onReadyRef.current = onReady
-  const fromRef = useRef(1)
-  const toRef = useRef(1)
   const source = useMemo(() => ({ data }), [data])
 
-  const pageH = width * ratio
-  const [from, to] = visibleRange(numPages, pageH, viewTop, viewHeight || pageH)
-  fromRef.current = from
-  toRef.current = to
+  useEffect(() => () => releaseCanvases(rootRef.current), [])
 
   const markPage = (pageNumber: number) => {
-    rendered.current.add(pageNumber)
     if (readySent.current) return
-    if (numPagesRef.current <= 0) return
-    for (let i = fromRef.current; i <= toRef.current; i++) {
-      if (!rendered.current.has(i)) return
+    rendered.current.add(pageNumber)
+    if (numPagesRef.current > 0 && rendered.current.size >= numPagesRef.current) {
+      readySent.current = true
+      onReadyRef.current()
     }
-    readySent.current = true
-    onReadyRef.current()
   }
 
-  const padTop = (from - 1) * (pageH + PAGE_GAP)
-  const padBottom = Math.max(0, numPages - to) * (pageH + PAGE_GAP)
-
   return (
-    <div className={`pdf-layer${hidden ? ' is-hidden' : ''}`} aria-hidden={hidden || undefined}>
-      <div style={{ paddingTop: padTop, paddingBottom: padBottom, width: '100%' }}>
-        <Document
-          file={source}
-          options={PDF_OPTIONS}
-          loading={null}
-          onLoadSuccess={pdf => {
-            numPagesRef.current = pdf.numPages
-            rendered.current = new Set()
-            setNumPages(pdf.numPages)
-            void pdf
-              .getPage(1)
-              .then(page => {
-                const vp = page.getViewport({ scale: 1 })
-                if (vp.width > 0) setRatio(vp.height / vp.width)
-              })
-              .catch(() => {})
-            if (pdf.numPages === 0) {
-              readySent.current = true
-              onReadyRef.current()
-            }
-          }}
-        >
-          {numPages > 0 &&
-            Array.from({ length: to - from + 1 }, (_, i) => {
-              const pageNumber = from + i
-              return (
-                <Page
-                  key={pageNumber}
-                  pageNumber={pageNumber}
-                  width={width}
-                  renderAnnotationLayer={false}
-                  renderTextLayer
-                  onRenderSuccess={() => markPage(pageNumber)}
-                  onRenderError={() => markPage(pageNumber)}
-                />
-              )
-            })}
-        </Document>
-      </div>
+    <div ref={rootRef} className={`pdf-layer${hidden ? ' is-hidden' : ''}`} aria-hidden={hidden || undefined}>
+      <Document
+        file={source}
+        options={PDF_OPTIONS}
+        loading={null}
+        onLoadSuccess={({ numPages: n }) => {
+          stampPreview('pdfParsed')
+          numPagesRef.current = n
+          rendered.current = new Set()
+          setNumPages(n)
+          if (n === 0) {
+            readySent.current = true
+            onReadyRef.current()
+          }
+        }}
+      >
+        {Array.from({ length: numPages }, (_, i) => (
+          <Page
+            key={i + 1}
+            pageNumber={i + 1}
+            width={width}
+            renderAnnotationLayer
+            renderTextLayer
+            onRenderSuccess={() => markPage(i + 1)}
+            onRenderError={() => markPage(i + 1)}
+          />
+        ))}
+      </Document>
     </div>
   )
 }

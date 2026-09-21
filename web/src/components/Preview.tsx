@@ -2,9 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { renderMarkdown } from '../markdown'
 import * as api from '../api'
 import { bytesToBase64, siblingPdfPath, ensureTypstCompiler, typstPdfBytes } from '../typst'
+import { stampPreview } from '../preview-trace'
 import { PdfViewer } from './PdfViewer'
-
-const COMPILE_DEBOUNCE = 500
 
 export function MarkdownView({ source }: { source: string }) {
   const html = useMemo(() => renderMarkdown(source), [source])
@@ -16,6 +15,8 @@ export function TypstView({ ws, path, source }: { ws: string; path: string; sour
   const [err, setErr] = useState('')
   const pdfPath = siblingPdfPath(path)
   const writeGen = useRef(0)
+  const inflight = useRef(false)
+  const pending = useRef<{ ws: string; pdfPath: string; source: string; gen: number } | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -33,29 +34,39 @@ export function TypstView({ ws, path, source }: { ws: string; path: string; sour
 
   useEffect(() => {
     if (!source) return
-    let cancelled = false
     const gen = ++writeGen.current
-    const timer = window.setTimeout(async () => {
+    pending.current = { ws, pdfPath, source, gen }
+    stampPreview('armed')
+
+    const drain = async () => {
+      if (inflight.current) return
+      inflight.current = true
       try {
-        const out = await typstPdfBytes(source)
-        if (cancelled) return
-        setBytes(out)
-        setErr('')
-        // Paint the new PDF before the base64 + PUT; disk is for the sibling file / iframe.
-        requestAnimationFrame(() => {
-          if (cancelled || gen !== writeGen.current) return
-          const b64 = bytesToBase64(out)
-          if (cancelled || gen !== writeGen.current) return
-          void api.writeFileBase64(ws, pdfPath, b64).catch(() => {})
-        })
-      } catch (e: any) {
-        if (!cancelled) setErr(String(e?.message ?? e))
+        while (pending.current) {
+          const job = pending.current
+          pending.current = null
+          stampPreview('compileStart')
+          try {
+            const out = await typstPdfBytes(job.source)
+            stampPreview('compileEnd')
+            if (job.gen !== writeGen.current) continue
+            setBytes(out)
+            stampPreview('bytesSet')
+            setErr('')
+            requestAnimationFrame(() => {
+              if (job.gen !== writeGen.current) return
+              void api.writeFileBase64(job.ws, job.pdfPath, bytesToBase64(out)).catch(() => {})
+            })
+          } catch (e: any) {
+            if (job.gen === writeGen.current) setErr(String(e?.message ?? e))
+          }
+        }
+      } finally {
+        inflight.current = false
+        if (pending.current) void drain()
       }
-    }, COMPILE_DEBOUNCE)
-    return () => {
-      cancelled = true
-      window.clearTimeout(timer)
     }
+    void drain()
   }, [ws, pdfPath, source])
 
   return (

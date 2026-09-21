@@ -9,6 +9,8 @@ const USER_FONTS = [
   '/fonts/AtkinsonHyperlegible-BoldItalic.otf'
 ]
 
+const MAIN = '/preview.typ'
+
 export function siblingPdfPath(typPath: string): string {
   return typPath.replace(/\.typ$/i, '') + '.pdf'
 }
@@ -30,8 +32,17 @@ export async function ensureTypstCompiler(): Promise<void> {
 
 export async function typstPdfBytes(source: string): Promise<Uint8Array> {
   await ensureTypstCompiler()
-  const data = await $typst.pdf({ mainContent: source })
-  return data as Uint8Array
+  const compiler = await $typst.getCompiler()
+  compiler.addSource(MAIN, source)
+  // runWithWorld frees the compile snapshot. $typst.pdf({ mainContent }) instead
+  // allocates a new /tmp/*.typ, calls compiler.reset() (drops font caches into
+  // the WASM heap), and never world.free()s — that grows the tab without bound.
+  const out = (await compiler.runWithWorld({ mainFilePath: MAIN }, world =>
+    world.pdf({ diagnostics: 'none' })
+  )) as { result?: Uint8Array }
+  const data = out.result
+  if (!data) throw new Error('Typst compile produced no PDF')
+  return new Uint8Array(data)
 }
 
 export function bytesToBase64(bytes: Uint8Array): string {
