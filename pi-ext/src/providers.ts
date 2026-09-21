@@ -58,13 +58,19 @@ export interface SearchResponse {
 
 type FetchImpl = typeof fetch
 
+function readJsonObject(file: string): Record<string, unknown> | undefined {
+  try {
+    const raw = JSON.parse(fs.readFileSync(file, 'utf8')) as unknown
+    if (typeof raw === 'object' && raw !== null && !Array.isArray(raw)) return raw as Record<string, unknown>
+  } catch {}
+  return undefined
+}
+
 export function loadVulcainConfig(): { tools?: VulcainToolsConfig } {
   const base = process.env.VULCAIN_HOME || path.join(os.homedir(), '.vulcain')
-  try {
-    return JSON.parse(fs.readFileSync(path.join(base, 'config', 'config.json'), 'utf8'))
-  } catch {
-    return {}
-  }
+  return readJsonObject(path.join(base, 'config', 'config.json'))
+    ?? readJsonObject(path.join(base, 'config.json.last-good')) // kept in sync by server loadConfig/saveConfig
+    ?? {}
 }
 
 export function camofoxBase(): string {

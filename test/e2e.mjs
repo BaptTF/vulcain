@@ -205,6 +205,21 @@ check(
 const reset = await reqJson('POST', '/api/chat/reset', { workspace: 'Notes' })
 check('chat: reset endpoint ok', reset.status === 200 && reset.body?.ok)
 
+const cfgBefore = await reqJson('GET', '/api/fs/file?ws=__config__&path=config.json')
+const brokenCfg = '{\n  "theme": "dark",\n  "workspaces": [\n'
+const putBroken = await reqJson('PUT', '/api/fs/file', { ws: '__config__', path: 'config.json', content: brokenCfg })
+const metaWhileBroken = await reqJson('GET', '/api/meta')
+const readBroken = await reqJson('GET', '/api/fs/file?ws=__config__&path=config.json')
+check('config: writing invalid JSON is accepted', putBroken.status === 200)
+check(
+  'config: invalid JSON keeps last good /api/meta',
+  metaWhileBroken.status === 200 && metaWhileBroken.body?.workspaces?.some(w => w.name === 'Notes')
+)
+check('config: invalid JSON stays in the editor file', readBroken.body?.content === brokenCfg)
+await reqJson('PUT', '/api/fs/file', { ws: '__config__', path: 'config.json', content: cfgBefore.body?.content ?? '{}' })
+const metaRestored = await reqJson('GET', '/api/meta')
+check('config: restoring valid JSON still serves /api/meta', metaRestored.status === 200)
+
 const badWs = await chatStream({ workspace: 'Nope', messages: [{ role: 'user', content: 'x' }] })
 check('chat: unknown workspace rejected', badWs.status === 400)
 

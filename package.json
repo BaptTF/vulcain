@@ -15,6 +15,7 @@
     "start": "npm run start -w server",
     "test:ui": "node scripts/test-ui.mjs",
     "test:websearch": "node test/web-search.mjs",
+    "test:config": "node test/config.mjs",
     "test:ui:docker": "docker build -f docker/Dockerfile.test -t vulcain-test . && docker run --rm vulcain-test",
     "lint": "eslint ."
   },
