@@ -27,7 +27,7 @@ import { toast } from 'sonner'
 import { subscribeWatch } from '../watch-client'
 import * as api from '../api'
 import { bytesToBase64, siblingPdfPath, typstPdfBytes } from '../typst'
-import { PdfViewer } from './PdfViewer'
+import { NativePdfFrame } from './PdfViewer'
 import { MarkdownView, TypstView } from './Preview'
 
 export interface Tab {
@@ -325,7 +325,7 @@ export default function EditorPane({
         </div>
       ) : /\.pdf$/i.test(activePath) ? (
         <div className="editor-pdf">
-          <PdfViewer file={api.fileUrl(ws, activePath)} />
+          <NativePdfFrame src={api.fileUrl(ws, activePath)} title={activePath} />
         </div>
       ) : (
         <div className="editor-area">

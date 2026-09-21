@@ -453,6 +453,16 @@ button, input, textarea, select {
   display: flex;
 }
 
+.pdf-frame {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  width: 100%;
+  height: 100%;
+  border: none;
+  background: var(--panel-2);
+}
+
 .pdf-viewer {
   flex: 1;
   min-height: 0;
@@ -483,25 +493,43 @@ button, input, textarea, select {
   min-height: 0;
   overflow: auto;
   padding: 12px;
+  overscroll-behavior: contain;
 }
 
-.pdf-scroll .react-pdf__Document {
+.pdf-stack {
+  display: grid;
+  grid-template-columns: minmax(min-content, 100%);
+  justify-items: center;
+}
+
+.pdf-layer {
+  grid-area: 1 / 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+}
+
+.pdf-layer .react-pdf__Document {
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 12px;
 }
 
-.pdf-scroll .react-pdf__Page {
+.pdf-layer.is-hidden {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.pdf-layer .react-pdf__Page {
   background: #fff;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
   border-radius: 2px;
 }
 
-.pdf-scroll .react-pdf__Page canvas {
+.pdf-layer .react-pdf__Page canvas {
   display: block;
-  max-width: 100%;
-  height: auto;
 }
 
 .panel-chat {

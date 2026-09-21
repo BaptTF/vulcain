@@ -26,15 +26,37 @@ File tree │ CodeMirror 6 editor (+ md/typst preview, PDF export) │ Agent cha
 | `docker/` | Dockerfile + compose. |
 | `.github/workflows/` | CI/CD (Docker build/push to ghcr.io). |
 
+## Nix flake (required locally)
+
+This repo is developed on NixOS. **`flake.nix` is the only supported local toolchain** for Node, Playwright, and UI tests. `.envrc` is `use flake` (direnv). If you are not already in that shell, wrap every Node/Playwright command:
+
+```bash
+nix develop --command npm run lint
+nix develop --command npm run build
+nix develop --command npm run test:ui
+```
+
+The flake sets `PLAYWRIGHT_BROWSERS_PATH` to nixpkgs `playwright-driver` Chromium and `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1`. `test/ui`'s Playwright package version **must** match that driver (see the `nix develop` warning if they drift).
+
+**Agents MUST NOT:**
+
+- Run `npx playwright install`, `npx playwright install chromium`, or `--with-deps`.
+- Download browsers into `~/.cache/ms-playwright` to "fix" a missing executable.
+- Run `npm run test:ui` from a host shell that is not the flake (missing system libs, wrong Chromium path, `browserType.launch: Executable doesn't exist`).
+
+If Playwright fails with a missing browser, you are **not** in `nix develop`. Re-run via `nix develop --command …`. Do not install Chromium another way.
+
+Docker (`npm run test:ui:docker`) is the CI / no-Nix fallback only.
+
 ## Commands
 
 ```bash
-nix develop              # Node 22 + Playwright Chromium (NixOS)
+nix develop --command bash   # Node 22 + Playwright Chromium from nixpkgs
 npm install
-npm run bootstrap        # scaffold ~/.vulcain/config/config.json + skills/, install pi extension
-npm run build            # build pi-ext, server, web
-npm run dev              # server :7331 + vite :5173 (open http://localhost:5173)
-npm run lint             # eslint .
+npm run bootstrap            # scaffold ~/.vulcain/config/config.json + skills/, install pi extension
+npm run build                # build pi-ext, server, web
+npm run dev                  # server :7331 + vite :5173 (open http://localhost:5173)
+npm run lint                 # eslint .
 ```
 
 ### Tests
@@ -52,32 +74,30 @@ node test/web-search.mjs                                      # 19 checks: SearX
 
 ### UI tests (`test/ui/ui.spec.mjs`)
 
-The UI suite drives a real Chromium via Playwright and needs the app served
-plus the fake chat backend (`VULCAIN_CHAT_BACKEND=fake`). It covers the editor (open, content,
-**autosave on typing**, **open-tab restoration across reload**), file tree, chat and
-workspace switcher.
+The UI suite drives Chromium via Playwright and needs the app served plus the
+fake chat backend (`VULCAIN_CHAT_BACKEND=fake`). It covers the editor (open, content,
+**autosave on typing**, **open-tab restoration across reload**), file tree, chat,
+workspace switcher, Typst preview, and PDF viewing.
 
-Enter the Nix flake first on NixOS (`nix develop`, or direnv with `.envrc`):
-it provides Node 22 and Playwright's Chromium (`PLAYWRIGHT_BROWSERS_PATH`).
-`test/ui` Playwright must match the nixpkgs `playwright-driver` version.
+**On this machine, always:**
 
-- **Native (`nix develop` / hosts with Chromium):** bootstraps an isolated env,
-  starts the server (serves `web/dist` + API on one port) and runs the spec:
+```bash
+nix develop --command npm run test:ui    # node scripts/test-ui.mjs (VULCAIN_PORT / BASE_URL overridable)
+```
 
-  ```bash
-  npm run test:ui     # node scripts/test-ui.mjs (VULCAIN_PORT / BASE_URL overridable)
-  ```
+That is the native/fast path: flake Chromium + `scripts/test-ui.mjs` (fresh
+`VULCAIN_HOME`, fake agent, `Notes` workspace with `welcome.md`, server serving
+`web/dist` + API, then the spec).
 
-- **Docker (self-contained CI path, no Nix required):**
-  `docker/Dockerfile.test` installs Playwright + Chromium deps and runs the same script:
+**Never** `npx playwright install` to make this work. The flake already provides
+the browser. `npm run test:ui` without `nix develop` will fail on NixOS.
+
+- **Docker (CI / hosts without Nix):** `docker/Dockerfile.test` installs
+  Playwright + Chromium deps and runs the same script:
 
   ```bash
   npm run test:ui:docker   # builds vulcain-test image then runs it
   ```
-
-  `scripts/test-ui.mjs` is the single source of truth for the test setup: fresh
-  `VULCAIN_HOME`, `agent.command` pointed at the fake agent, a `Notes` workspace
-  with `welcome.md`, then server + spec.
 
 ## Project rules
 
@@ -93,7 +113,7 @@ These rules apply to every contribution. Violations are treated as review blocke
    Do not repeat yourself. Extract shared logic into reusable modules/functions instead of duplicating code. If a pattern appears a second time, refactor it into a shared helper. Keep the single source of truth (e.g. config lives in `~/.vulcain/config.json`) and reference it rather than duplicating values.
 
 4. **Test your changes.**
-   Any functional change must be accompanied by tests. The project uses `node test/e2e.mjs` (requires a running server) for backend/bridge coverage, `node test/web-search.mjs` for the search providers/research orchestration, and `test/ui` for the frontend. Update existing tests and add new ones covering the changed behavior. Run `npm run lint` and the test suite before finishing.
+   Any functional change must be accompanied by tests. The project uses `node test/e2e.mjs` (requires a running server) for backend/bridge coverage, `node test/web-search.mjs` for the search providers/research orchestration, and `test/ui` for the frontend. Update existing tests and add new ones covering the changed behavior. Run `npm run lint` and the test suite before finishing. On NixOS, run those commands **inside** `nix develop` (see **Nix flake** above).
 
 ## Conventions
 

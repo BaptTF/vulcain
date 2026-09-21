@@ -655,17 +655,22 @@ await page.waitForTimeout(300)
 check('agent expandable after reload', await boxVisible('.panel-chat'))
 
 // --- typst preview compiles a sibling PDF and renders it with react-pdf ---
-await putFile('page.typ', '#set page(width: 10cm, height: 15cm)\n#align(center)[Typst Page]\n')
+await putFile(
+  'page.typ',
+  '#set page(width: 10cm, height: 16cm)\n#align(center)[Typst Page]\n#pagebreak()\n#lorem(40)\n#pagebreak()\n#lorem(40)\n#pagebreak()\n#lorem(40)\n#pagebreak()\n#lorem(40)\n'
+)
 await page.waitForTimeout(800)
 const typRow = page.locator('[role="treeitem"]', { hasText: 'page.typ' }).first()
 await typRow.click()
 const previewPdf = page.locator('.panel-preview [data-testid="pdf-viewer"]')
 const pdfText = async () =>
-  (await previewPdf.locator('.react-pdf__Page__textContent').allTextContents()).join(' ')
+  (await previewPdf.locator('.pdf-layer:not(.is-hidden) .react-pdf__Page__textContent').allTextContents()).join(' ')
 const waitForPdf = async marker => {
   for (let i = 0; i < 30; i++) {
     await page.waitForTimeout(500) // typst WASM compile + react-pdf render
-    if ((await previewPdf.locator('canvas').count()) && (await pdfText()).includes(marker)) return true
+    if ((await previewPdf.locator('.pdf-layer:not(.is-hidden) canvas').count()) && (await pdfText()).includes(marker)) {
+      return true
+    }
   }
   return false
 }
@@ -676,24 +681,61 @@ if (typFound) {
   const canvasBox = await previewPdf.locator('canvas').first().boundingBox()
   check('typst pdf page has positive size', !!canvasBox && canvasBox.width > 0 && canvasBox.height > 0)
   check('typst pdf page fits the preview width', !!canvasBox && canvasBox.width > 0 && canvasBox.width <= cw)
+  const beforeZoom = canvasBox
+  await previewPdf.getByRole('button', { name: 'Zoom in' }).click()
+  await page.waitForTimeout(400)
+  const zoomed = await previewPdf.locator('canvas').first().boundingBox()
+  check('typst pdf zoom in enlarges the page', !!beforeZoom && !!zoomed && zoomed.width > beforeZoom.width + 8)
+  await previewPdf.getByRole('button', { name: 'Fit' }).click()
+  await page.waitForTimeout(400)
+  const fitted = await previewPdf.locator('canvas').first().boundingBox()
+  const cwFit = await previewPdf.locator('.pdf-scroll').evaluate(el => el.clientWidth)
+  check('typst pdf fit returns to preview width', !!fitted && fitted.width > 0 && fitted.width <= cwFit)
 } else {
   check('typst pdf page has positive size', false)
   check('typst pdf page fits the preview width', false)
+  check('typst pdf zoom in enlarges the page', false)
+  check('typst pdf fit returns to preview width', false)
 }
 const siblingPdf = await page.evaluate(async () => {
   const ws = localStorage.getItem('vulcain.ws') || ''
   const r = await fetch(`/api/fs/file?ws=${encodeURIComponent(ws)}&path=page.pdf`)
-  if (!r.ok) return { ok: false, header: '' }
+  if (!r.ok) return { ok: false, header: '', disposition: '', type: '' }
   const buf = new Uint8Array(await r.arrayBuffer())
-  return { ok: true, header: new TextDecoder().decode(buf.slice(0, 4)) }
+  return {
+    ok: true,
+    header: new TextDecoder().decode(buf.slice(0, 4)),
+    disposition: r.headers.get('content-disposition') || '',
+    type: r.headers.get('content-type') || ''
+  }
 })
 check('typst watch writes a sibling page.pdf', siblingPdf.ok && siblingPdf.header === '%PDF')
+check(
+  'sibling pdf is served inline for the native viewer',
+  siblingPdf.type.includes('application/pdf') && siblingPdf.disposition.startsWith('inline')
+)
 check('file tree lists the sibling pdf', await page.locator('[role="treeitem"]', { hasText: 'page.pdf' }).first().isVisible())
+
+const pdfScroll = previewPdf.locator('.pdf-scroll')
+let scrolled = 0
+for (let i = 0; i < 25; i++) {
+  const pages = await previewPdf.locator('.pdf-layer:not(.is-hidden) canvas').count()
+  scrolled = await pdfScroll.evaluate((el, n) => {
+    if (n < 3 || el.scrollHeight <= el.clientHeight + 40) return 0
+    el.scrollTop = Math.min(240, el.scrollHeight - el.clientHeight)
+    return el.scrollTop
+  }, pages)
+  if (scrolled > 80) break
+  await page.waitForTimeout(200)
+}
+check('typst pdf preview is scrollable', scrolled > 80)
 
 await page.locator('.cm-content').click()
 await page.keyboard.press('Control+End')
 await page.keyboard.type('\nWATCH_PDF_MARKER')
 check('typst watch refreshes the pdf after an edit', await waitForPdf('WATCH_PDF_MARKER'))
+const scrolledAfter = await pdfScroll.evaluate(el => el.scrollTop)
+check('typst pdf keeps scroll after recompile', scrolled > 80 && Math.abs(scrolledAfter - scrolled) < 50)
 
 await putFile('bad.typ', '#definitely_not_a_function[oops]\n')
 await page.waitForTimeout(600)
@@ -720,12 +762,13 @@ await page.locator('[role="treeitem"]', { hasText: 'page.pdf' }).first().click()
 let editorPdf = false
 for (let i = 0; i < 16; i++) {
   await page.waitForTimeout(250)
-  if (await page.locator('.editor-pdf [data-testid="pdf-viewer"] canvas').count()) {
+  const frame = page.locator('.editor-pdf [data-testid="pdf-frame"]')
+  if ((await frame.count()) && (await frame.getAttribute('src') || '').includes('page.pdf')) {
     editorPdf = true
     break
   }
 }
-check('opening the sibling pdf uses the pdf viewer', editorPdf)
+check('opening the sibling pdf uses the native pdf viewer', editorPdf)
 
 // --- tab X hides in a shared tab group and the viewbar restores it there ---
 const paneTab = id => page.locator(`.dv-tab[data-tab-panel-id="${id}"]`).first()

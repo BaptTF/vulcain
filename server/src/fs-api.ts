@@ -146,6 +146,9 @@ export function registerFsApi(app: FastifyInstance): void {
     if (BINARY_EXT.has(ext)) {
       const data = await fsp.readFile(abs)
       reply.header('content-type', mimeOf(ext))
+      reply.header('content-length', st.size)
+      reply.header('cache-control', 'no-cache')
+      reply.header('content-disposition', contentDisposition('inline', path.basename(abs)))
       return reply.send(data)
     }
     return { content: await fsp.readFile(abs, 'utf8') }
@@ -160,11 +163,7 @@ export function registerFsApi(app: FastifyInstance): void {
     const ext = path.extname(abs).slice(1).toLowerCase()
     reply.header('content-type', mimeOf(ext))
     reply.header('content-length', st.size)
-    const asciiName = name.replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '_')
-    reply.header(
-      'content-disposition',
-      `attachment; filename="${asciiName}"; filename*=UTF-8''${encodeURIComponent(name)}`
-    )
+    reply.header('content-disposition', contentDisposition('attachment', name))
     return reply.send(await fsp.readFile(abs))
   })
 
@@ -307,6 +306,11 @@ export function registerFsApi(app: FastifyInstance): void {
     await fsp.rm(resolveInWorkspace(ws, body.path ?? ''), { recursive: true })
     return { ok: true }
   })
+}
+
+function contentDisposition(kind: 'inline' | 'attachment', name: string): string {
+  const asciiName = name.replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '_')
+  return `${kind}; filename="${asciiName}"; filename*=UTF-8''${encodeURIComponent(name)}`
 }
 
 function mimeOf(ext: string): string {
