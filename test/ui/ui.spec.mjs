@@ -976,8 +976,7 @@ for (let i = 0; i < 10; i++) {
   await page.waitForTimeout(200)
   if (await page.locator('.aui-composer-actions .btn', { hasText: 'Envoyer' }).isVisible()) break
 }
-check('scroll-to-bottom button stays hidden while pinned to the bottom', !(await scrollBtn.isVisible()))
-// scroll to the real bottom -> button hides
+// autoScroll is off (idle CPU); pin to bottom then check the button
 await page.evaluate(() => {
   const v = document.querySelector('.aui-viewport')
   if (v) v.scrollTop = v.scrollHeight

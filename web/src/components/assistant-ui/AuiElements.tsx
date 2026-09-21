@@ -1,4 +1,4 @@
-import { createContext, forwardRef, useContext, useState, type ReactNode } from 'react'
+import { createContext, forwardRef, useContext, useRef, useState, type ReactNode } from 'react'
 import {
   ActionBarPrimitive,
   ComposerPrimitive,
@@ -43,21 +43,34 @@ function toolTitle(toolName: string, args: unknown): string | undefined {
 }
 
 export function AuiThread({ onOpenFile }: { onOpenFile: (path: string) => void }): ReactNode {
+  const scrollerRef = useRef<HTMLDivElement>(null)
+  const [atBottom, setAtBottom] = useState(true)
+  const onScroll = () => {
+    const el = scrollerRef.current
+    if (!el) return
+    const next = el.scrollHeight - el.scrollTop - el.clientHeight <= 8
+    setAtBottom(prev => (prev === next ? prev : next))
+  }
+  const jumpBottom = () => {
+    const el = scrollerRef.current
+    if (!el) return
+    el.scrollTop = el.scrollHeight
+    setAtBottom(true)
+  }
   return (
     <ThreadPrimitive.Root className="aui-thread">
-      {/* turnAnchor="top" runs a 60fps rAF+setState loop in assistant-ui's reserve observer. */}
-      <ThreadPrimitive.Viewport className="aui-viewport">
+      <div className="aui-viewport" ref={scrollerRef} onScroll={onScroll}>
         <div className="aui-messages">
           <ThreadPrimitive.Messages>{() => <AuiMessage onOpenFile={onOpenFile} />}</ThreadPrimitive.Messages>
         </div>
-      </ThreadPrimitive.Viewport>
+      </div>
       <div className="aui-thread-footer">
         <AuiComposer />
-        <ThreadPrimitive.ScrollToBottom asChild>
-          <button className="aui-scroll-bottom" type="button" aria-label="Descendre en bas">
+        {!atBottom ? (
+          <button className="aui-scroll-bottom" type="button" aria-label="Descendre en bas" onClick={jumpBottom}>
             ↓
           </button>
-        </ThreadPrimitive.ScrollToBottom>
+        ) : null}
       </div>
     </ThreadPrimitive.Root>
   )

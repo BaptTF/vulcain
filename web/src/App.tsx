@@ -71,6 +71,10 @@ export default function App() {
     return { tree: true, editor: true, preview: true, agent: true }
   })
 
+  const handlePanesChange = useCallback((next: Record<PaneId, boolean>) => {
+    setPanes(prev => (PANE_IDS.every(id => prev[id] === next[id]) ? prev : next))
+  }, [])
+
   const togglePane = useCallback((id: PaneId) => {
     workbenchRef.current?.togglePane(id)
   }, [])
@@ -184,7 +188,7 @@ export default function App() {
           ws={activeWs}
           theme={meta?.theme ?? 'dark'}
           panes={panes}
-          onPanesChange={setPanes}
+          onPanesChange={handlePanesChange}
           tabs={tabs}
           activePath={activeTab}
           onActivate={setActiveTab}
