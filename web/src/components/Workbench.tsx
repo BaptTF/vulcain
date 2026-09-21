@@ -27,6 +27,12 @@ export type PaneId = 'tree' | 'editor' | 'preview' | 'agent'
 export const PANE_IDS: PaneId[] = ['tree', 'editor', 'preview', 'agent']
 
 const LAYOUT_KEY = 'vulcain.dock.v2'
+const SIZES_KEY = 'vulcain.dock.sizes.v2'
+
+const DEFAULT_PANE_WIDTH: Partial<Record<PaneId, number>> = {
+  tree: 240,
+  agent: 360
+}
 
 const PANE_TITLE: Record<PaneId, string> = {
   tree: 'Tree',
@@ -138,15 +144,43 @@ function persistLayout(api: DockviewApi): void {
   } catch {}
 }
 
-function addPane(api: DockviewApi, id: PaneId): void {
+function readPaneSizes(): Partial<Record<PaneId, number>> {
+  try {
+    const raw = localStorage.getItem(SIZES_KEY)
+    if (!raw) return { ...DEFAULT_PANE_WIDTH }
+    const parsed = JSON.parse(raw) as Partial<Record<PaneId, number>>
+    if (!parsed || typeof parsed !== 'object') return { ...DEFAULT_PANE_WIDTH }
+    return { ...DEFAULT_PANE_WIDTH, ...parsed }
+  } catch {
+    return { ...DEFAULT_PANE_WIDTH }
+  }
+}
+
+function writePaneSizes(sizes: Partial<Record<PaneId, number>>): void {
+  try {
+    localStorage.setItem(SIZES_KEY, JSON.stringify(sizes))
+  } catch {}
+}
+
+function snapshotPaneSizes(api: DockviewApi, sizes: Partial<Record<PaneId, number>>): void {
+  for (const id of PANE_IDS) {
+    const width = api.getPanel(id)?.api.width
+    if (typeof width === 'number' && width >= 8) sizes[id] = Math.round(width)
+  }
+}
+
+function addPane(api: DockviewApi, id: PaneId, sizes: Partial<Record<PaneId, number>>): void {
   if (api.getPanel(id)) return
-  api.addPanel({
+  const width = sizes[id]
+  const panel = api.addPanel({
     id,
     component: id,
     title: PANE_TITLE[id],
     minimumWidth: id === 'tree' ? 140 : 180,
+    initialWidth: width,
     position: defaultPosition(api, id)
   })
+  if (width) panel.api.setSize({ width })
 }
 
 function defaultPosition(api: DockviewApi, id: PaneId) {
@@ -252,6 +286,7 @@ const Workbench = forwardRef<WorkbenchHandle, Props>(function Workbench(
   const persistTimer = useRef(0)
   const restoredRef = useRef(false)
   const sashDragging = useRef(false)
+  const paneSizes = useRef(readPaneSizes())
   const [live, setLive] = useState<LiveDoc>({ path: null, text: '' })
   const initialPanes = useRef(panes)
 
@@ -262,7 +297,11 @@ const Workbench = forwardRef<WorkbenchHandle, Props>(function Workbench(
     window.clearTimeout(persistTimer.current)
     persistTimer.current = 0
     if (sashDragging.current) return
-    if (apiRef.current) persistLayout(apiRef.current)
+    const api = apiRef.current
+    if (!api) return
+    snapshotPaneSizes(api, paneSizes.current)
+    writePaneSizes(paneSizes.current)
+    persistLayout(api)
   }, [])
 
   const schedulePersist = useCallback(() => {
@@ -328,8 +367,11 @@ const Workbench = forwardRef<WorkbenchHandle, Props>(function Workbench(
       const api = apiRef.current
       if (!api) return
       const panel = api.getPanel(id)
-      if (panel) panel.api.close()
-      else addPane(api, id)
+      if (panel) {
+        snapshotPaneSizes(api, paneSizes.current)
+        writePaneSizes(paneSizes.current)
+        panel.api.close()
+      } else addPane(api, id, paneSizes.current)
     }
   }))
 
@@ -342,8 +384,12 @@ const Workbench = forwardRef<WorkbenchHandle, Props>(function Workbench(
       api.getPanel('editor')?.api.setActive()
       requestAnimationFrame(() => {
         if (!restoredRef.current) applyDefaultSizes(api)
+        snapshotPaneSizes(api, paneSizes.current)
       })
-      api.onDidLayoutChange(() => schedulePersist())
+      api.onDidLayoutChange(() => {
+        snapshotPaneSizes(api, paneSizes.current)
+        schedulePersist()
+      })
       api.onDidAddPanel(() => syncPanes(api))
       api.onDidRemovePanel(() => syncPanes(api))
     },

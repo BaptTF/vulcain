@@ -127,6 +127,8 @@ check('editor has a vertical sash on its right edge', !!editorSash)
 let editorGrew = false
 let resizeStuck = false
 let stillRowAfterResize = false
+let startW = beforeResize.editor?.w ?? 0
+let settled = beforeResize
 const topAtSash = editorSash
   ? await page.evaluate(({ x, y }) => {
       const n = document.elementFromPoint(x, y)
@@ -143,7 +145,7 @@ if (editorSash && !topAtSash?.cls?.includes('dv-sash')) {
 const floatingGroupCount = () => page.locator('.dv-render-overlay-float').count()
 
 if (editorSash) {
-  const startW = beforeResize.editor?.w ?? 0
+  startW = beforeResize.editor?.w ?? 0
   // Dockview sashes listen to PointerEvents on document. Playwright's mouse +
   // waitForTimeout between moves drops that pointer (use mouse.move({ steps })
   // for mouse splitters). Keep the whole drag in one gesture: sync moves, then
@@ -185,7 +187,7 @@ if (editorSash) {
   await page.waitForTimeout(150)
   const justAfter = await paneBoxes()
   await page.waitForTimeout(600)
-  const settled = await paneBoxes()
+  settled = await paneBoxes()
   const grewSync = (held?.afterSync ?? 0) >= startW + 40
   const heldWithoutSnap = (held?.mid ?? 0) >= startW + 40
   const grewJustAfter = (justAfter.editor?.w ?? 0) >= startW + 40
@@ -213,6 +215,27 @@ check('dragging editor right sash widens the editor', editorGrew)
 check('editor resize sticks after a long drag (no snap-back)', resizeStuck)
 check('layout stays side by side after editor resize', stillRowAfterResize)
 check('long sash drag does not float a group', (await floatingGroupCount()) === 0)
+
+let editorReopenKeepsWidth = false
+if (resizeStuck) {
+  const wide = settled.editor?.w ?? 0
+  const editorToggle = page.locator('.viewbar .pane-toggle', { hasText: 'Editor' })
+  await editorToggle.click()
+  await page.waitForTimeout(350)
+  const hidden = await page.evaluate(() => {
+    const n = document.querySelector('[data-testid="editor"]')
+    return !n || n.getBoundingClientRect().width < 4
+  })
+  await editorToggle.click()
+  await page.waitForTimeout(400)
+  const reopened = await paneBoxes()
+  const w = reopened.editor?.w ?? 0
+  editorReopenKeepsWidth = hidden && w >= startW + 40 && Math.abs(w - wide) < 24
+  if (!editorReopenKeepsWidth) {
+    console.log('  -> reopen after resize', JSON.stringify({ startW, wide, hidden, reopened }))
+  }
+}
+check('closing and reopening the editor keeps the resized width', editorReopenKeepsWidth)
 if (ONLY === 'resize') await finish()
 
 // dragging the editor tab-bar void (dockview's group drag handle, next to the sash)
