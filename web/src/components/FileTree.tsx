@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState } f
 import { useDropzone } from 'react-dropzone'
 import { Tree, type MoveHandler, type NodeApi, type RenameHandler, type TreeApi } from 'react-arborist'
 import { toast } from 'sonner'
+import { confirmDelete } from '../confirmDelete'
 import { downloadUrl, getTree, mkdir, remove, rename, touch, writeFileBase64, type TreeEntry } from '../api'
 import { subscribeWatch } from '../watch-client'
 
@@ -197,22 +198,12 @@ export default function FileTree({ ws, onOpen }: Props) {
 
   const requestDelete = useCallback(
     (path: string) => {
-      toast(`Supprimer « ${path} » ?`, {
-        description: 'Cette action est définitive.',
-        duration: 10000,
-        action: {
-          label: 'Supprimer',
-          onClick: async () => {
-            try {
-              await remove(ws, path)
-              toast.success(`« ${path} » supprimé`)
-            } catch (e: any) {
-              toast.error('Suppression impossible', { description: String(e?.message ?? e) })
-            }
-            reload()
-          }
-        },
-        cancel: { label: 'Annuler', onClick: () => {} }
+      confirmDelete(path, async () => {
+        try {
+          await remove(ws, path)
+        } finally {
+          reload()
+        }
       })
     },
     [ws, reload]

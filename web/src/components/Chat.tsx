@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AssistantRuntimeProvider, useAui, useAuiState, useRemoteThreadListRuntime } from '@assistant-ui/react'
 import { AssistantChatTransport, useAISDKChat, useAISDKError, useChatRuntime } from '@assistant-ui/ai-sdk'
-import { AuiSessionsPanel, AuiThread, AuiUsageBar } from './assistant-ui/AuiElements'
+import { AuiSessionsPanel, AuiThread, AuiUsageBar, SessionDeleteProvider } from './assistant-ui/AuiElements'
 import { VulcainHistoryAdapter } from './assistant-ui/vulcainHistoryAdapter'
 import { createServerThreadAdapter } from './assistant-ui/serverThreadAdapter'
 import { abortChat, getChatMessages, listChatSessions, setActiveChatSession, subscribeChatEvents } from '../api'
@@ -82,6 +82,12 @@ export default function Chat({
   }, [ws])
 
   useEffect(() => {
+    if (restoredIdRef.current && activeThreadId === restoredIdRef.current) {
+      restoredIdRef.current = null
+    }
+  }, [activeThreadId])
+
+  useEffect(() => {
     if (!focusSessionId) return
     setActiveThreadId(focusSessionId)
     onFocusApplied?.()
@@ -98,6 +104,7 @@ export default function Chat({
       if (!target) return
       if (sessionsRef.current?.contains(target)) return
       if (sessionsBtnRef.current?.contains(target)) return
+      if (target.closest('[data-sonner-toast]')) return
       setSessionsOpen(false)
     }
     document.addEventListener('mousedown', onPointerDown)
@@ -129,10 +136,10 @@ export default function Chat({
     adapter,
     threadId: activeThreadId ?? undefined,
     onThreadIdChange: (id: string | undefined) => {
-      if (restoredIdRef.current) {
-        if (id !== restoredIdRef.current) return
-        restoredIdRef.current = null
+      if (restoredIdRef.current && id !== restoredIdRef.current && activeThreadId !== restoredIdRef.current) {
+        return
       }
+      restoredIdRef.current = null
       setActiveThreadId(id)
       if (id) void setActiveChatSession(ws, id)
     }
@@ -140,22 +147,24 @@ export default function Chat({
 
   return (
     <AssistantRuntimeProvider runtime={runtime}>
-      <ChatEscape
-        enabled={visible}
-        ws={ws}
-        sessionsOpen={sessionsOpen}
-        onCloseSessions={() => setSessionsOpen(false)}
-      />
-      <SessionCatchUp ws={ws} />
-      <div className="panel-chat" data-testid="agent-chat" hidden={!visible}>
-        <ChatHeader
+      <SessionDeleteProvider onBeforeDelete={() => { restoredIdRef.current = null }}>
+        <ChatEscape
+          enabled={visible}
+          ws={ws}
           sessionsOpen={sessionsOpen}
-          onToggleSessions={() => setSessionsOpen(o => !o)}
-          sessionsBtnRef={sessionsBtnRef}
+          onCloseSessions={() => setSessionsOpen(false)}
         />
-        {sessionsOpen && <AuiSessionsPanel ref={sessionsRef} onSelect={() => setSessionsOpen(false)} />}
-        <AuiThread onOpenFile={onOpenFile} ws={ws} visible={visible} />
-      </div>
+        <SessionCatchUp ws={ws} />
+        <div className="panel-chat" data-testid="agent-chat" hidden={!visible}>
+          <ChatHeader
+            sessionsOpen={sessionsOpen}
+            onToggleSessions={() => setSessionsOpen(o => !o)}
+            sessionsBtnRef={sessionsBtnRef}
+          />
+          {sessionsOpen && <AuiSessionsPanel ref={sessionsRef} onSelect={() => setSessionsOpen(false)} />}
+          <AuiThread onOpenFile={onOpenFile} ws={ws} visible={visible} />
+        </div>
+      </SessionDeleteProvider>
     </AssistantRuntimeProvider>
   )
 }

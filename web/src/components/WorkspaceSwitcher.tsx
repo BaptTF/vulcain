@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import { createWorkspace, getMeta, removeWorkspace } from '../api'
+import { confirmDelete } from '../confirmDelete'
 
 interface Props {
   activeWs: string
@@ -26,15 +27,22 @@ export default function WorkspaceSwitcher({ activeWs, onSelect, onOpenFolder }: 
     refresh()
   }, [])
 
-  const remove = async (name: string) => {
-    if (!window.confirm(`Retirer le workspace "${name}" de la config ? (les fichiers ne sont pas supprimés)`)) return
-    setBusy(true)
-    try {
-      await removeWorkspace(name)
-      refresh()
-      if (name === activeWs) onSelect('__config__')
-    } catch {}
-    setBusy(false)
+  const requestRemove = (name: string) => {
+    const current = activeWs
+    setMenuOpen(false)
+    confirmDelete(
+      name,
+      async () => {
+        await removeWorkspace(name)
+        const meta = await getMeta()
+        setWorkspaces(meta.workspaces)
+        if (name === current) onSelect('__config__')
+      },
+      {
+        description: 'Le workspace sera retiré de la config. Les fichiers ne sont pas supprimés.',
+        success: `« ${name} » retiré`
+      }
+    )
   }
 
   const isConfigWs = activeWs === '__config__'
@@ -92,28 +100,24 @@ export default function WorkspaceSwitcher({ activeWs, onSelect, onOpenFolder }: 
       <DropdownMenu.Portal>
         <DropdownMenu.Content className="ws-menu" sideOffset={6} align="start">
           {workspaces.map(w => (
-            <DropdownMenu.Item
-              key={w.name}
-              className={`ws-menu-item${w.name === activeWs ? ' active' : ''}`}
-              onSelect={() => onSelect(w.name)}
-            >
-              <span className="ws-menu-name">{w.name === '__config__' ? 'Config' : w.name}</span>
-              {w.root && w.name !== '__config__' && <span className="ws-menu-path">{w.root}</span>}
+            <div key={w.name} className="ws-menu-row">
+              <DropdownMenu.Item
+                className={`ws-menu-item${w.name === activeWs ? ' active' : ''}`}
+                onSelect={() => onSelect(w.name)}
+              >
+                <span className="ws-menu-name">{w.name === '__config__' ? 'Config' : w.name}</span>
+                {w.root && w.name !== '__config__' && <span className="ws-menu-path">{w.root}</span>}
+              </DropdownMenu.Item>
               {w.name !== '__config__' && (
-                <span
+                <DropdownMenu.Item
                   className="ws-menu-remove"
                   title="Retirer de la config"
-                  onPointerDown={e => e.stopPropagation()}
-                  onClick={e => {
-                    e.stopPropagation()
-                    e.preventDefault()
-                    void remove(w.name)
-                  }}
+                  onSelect={() => requestRemove(w.name)}
                 >
                   ×
-                </span>
+                </DropdownMenu.Item>
               )}
-            </DropdownMenu.Item>
+            </div>
           ))}
           <DropdownMenu.Separator className="ws-menu-sep" />
           {creating ? (

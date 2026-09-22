@@ -11,10 +11,11 @@ export interface TreeEntry {
 }
 
 async function req<T>(url: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(url, {
-    headers: { 'content-type': 'application/json' },
-    ...init
-  })
+  const headers = new Headers(init?.headers)
+  if (init?.body && !headers.has('content-type')) {
+    headers.set('content-type', 'application/json')
+  }
+  const res = await fetch(url, { ...init, headers })
   if (!res.ok) {
     let msg = `${res.status}`
     try {

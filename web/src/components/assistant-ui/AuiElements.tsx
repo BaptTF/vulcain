@@ -9,10 +9,12 @@ import {
   ThreadListItemPrimitive,
   ThreadPrimitive,
   groupPartByType,
+  useAui,
   useAuiState
 } from '@assistant-ui/react'
 import { useThreadTokenUsage } from '@assistant-ui/ai-sdk'
 import { abortChat } from '../../api'
+import { confirmDelete } from '../../confirmDelete'
 import { renderMarkdown } from '../../markdown'
 
 const GROUP = groupPartByType({
@@ -437,7 +439,26 @@ function AuiComposer({ ws }: { ws: string }): ReactNode {
 }
 
 const SessionsPanelContext = createContext<(() => void) | undefined>(undefined)
+const DeleteSessionContext = createContext<((id: string) => void) | null>(null)
 const SESSION_ITEM_COMPONENTS = { ThreadListItem: AuiSessionItem }
+
+export function SessionDeleteProvider({
+  children,
+  onBeforeDelete
+}: {
+  children: ReactNode
+  onBeforeDelete?: () => void
+}): ReactNode {
+  const aui = useAui()
+  const deleteSession = useCallback(
+    (id: string) => {
+      onBeforeDelete?.()
+      aui.threads.item({ id }).delete()
+    },
+    [aui, onBeforeDelete]
+  )
+  return <DeleteSessionContext.Provider value={deleteSession}>{children}</DeleteSessionContext.Provider>
+}
 
 export const AuiSessionsPanel = forwardRef<HTMLDivElement, { onSelect?: () => void }>(
   function AuiSessionsPanel({ onSelect }, ref): ReactNode {
@@ -460,6 +481,9 @@ export const AuiSessionsPanel = forwardRef<HTMLDivElement, { onSelect?: () => vo
 
 function AuiSessionItem(): ReactNode {
   const onSelect = useContext(SessionsPanelContext)
+  const deleteSession = useContext(DeleteSessionContext)
+  const itemId = useAuiState((s: any) => s.threadListItem?.id)
+  const title = useAuiState((s: any) => s.threadListItem?.title) as string | undefined
   return (
     <ThreadListItemPrimitive.Root className="aui-session-item">
       <ThreadListItemPrimitive.Trigger asChild>
@@ -469,11 +493,23 @@ function AuiSessionItem(): ReactNode {
           </span>
         </button>
       </ThreadListItemPrimitive.Trigger>
-      <ThreadListItemPrimitive.Delete asChild>
-        <button type="button" className="icon-btn aui-session-delete" title="Supprimer">
-          ✕
-        </button>
-      </ThreadListItemPrimitive.Delete>
+      <button
+        type="button"
+        className="icon-btn aui-session-delete"
+        title="Supprimer"
+        onPointerDown={e => e.stopPropagation()}
+        onClick={e => {
+          e.preventDefault()
+          e.stopPropagation()
+          const id = itemId
+          if (!id || !deleteSession) return
+          confirmDelete(title?.trim() || 'cette session', async () => {
+            deleteSession(id)
+          })
+        }}
+      >
+        ✕
+      </button>
     </ThreadListItemPrimitive.Root>
   )
 }

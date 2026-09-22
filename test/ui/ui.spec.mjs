@@ -9,6 +9,20 @@ const check = (name, cond) => {
   results.push(cond)
   console.log(`${cond ? 'PASS' : 'FAIL'} ${name}`)
 }
+const toastWithText = async (text, timeout = 5000) => {
+  try {
+    await page.locator('[data-sonner-toast]', { hasText: text }).first().waitFor({ state: 'visible', timeout })
+    return true
+  } catch {
+    return false
+  }
+}
+const confirmDeleteToast = async (name) => {
+  const toast = page.locator('[data-sonner-toast]', { hasText: name }).first()
+  await toast.waitFor({ state: 'visible', timeout: 5000 })
+  await page.locator('.ws-menu').waitFor({ state: 'hidden', timeout: 2000 }).catch(() => {})
+  await toast.locator('button[data-action]').click()
+}
 const finish = async () => {
   try {
     await page.screenshot({
@@ -1146,6 +1160,30 @@ for (let i = 0; i < 20; i++) {
 }
 check('second thread content restored after reload', secondRestored)
 
+await sessionsBtn.click()
+await page.waitForTimeout(250)
+const extraSession = page.locator('.aui-session-item', { hasText: 'hello second' }).first()
+await extraSession.hover()
+await extraSession.locator('.aui-session-delete').click()
+check('session delete asks for confirmation', await toastWithText('hello second'))
+await confirmDeleteToast('hello second')
+let sessionDeleted = false
+for (let i = 0; i < 20; i++) {
+  await page.waitForTimeout(200)
+  if (!(await page.locator('.aui-session-item', { hasText: 'hello second' }).count())) {
+    sessionDeleted = true
+    break
+  }
+}
+if (!sessionDeleted) {
+  await sessionsBtn.click().catch(() => {})
+  await page.waitForTimeout(250)
+  sessionDeleted = (await page.locator('.aui-session-item', { hasText: 'hello second' }).count()) === 0
+}
+check('session delete removes the thread', sessionDeleted)
+await page.keyboard.press('Escape')
+await page.waitForTimeout(200)
+
 // Escape stops a running agent the same way as the Stop button
 await sessionsBtn.click()
 await page.waitForTimeout(250)
@@ -1393,6 +1431,24 @@ for (let i = 0; i < 10; i++) {
   }
 }
 check('new workspace created and selected', wsCreated)
+await wsTrigger.click()
+await page.waitForTimeout(300)
+await wsItem('Notes').click()
+await page.waitForTimeout(400)
+await wsTrigger.click()
+await page.waitForTimeout(300)
+await page.locator('.ws-menu-row', { hasText: newWsName }).locator('.ws-menu-remove').click()
+check('workspace delete asks for confirmation', await toastWithText(newWsName))
+await confirmDeleteToast(newWsName)
+check('workspace delete confirmation succeeded', await toastWithText(`« ${newWsName} » retiré`))
+await page.keyboard.press('Escape').catch(() => {})
+await page.waitForTimeout(200)
+await wsTrigger.click()
+await page.locator('.ws-menu').waitFor({ state: 'visible', timeout: 3000 })
+const wsStillListed = await page.locator('.ws-menu .ws-menu-row', { hasText: newWsName }).count()
+check('workspace delete removes it from the switcher', wsStillListed === 0)
+await page.keyboard.press('Escape')
+await page.waitForTimeout(200)
 await wsTrigger.click()
 await page.waitForTimeout(300)
 await wsItem('Notes').click()

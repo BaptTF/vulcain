@@ -786,10 +786,18 @@ button, input, textarea, select {
   z-index: 60;
 }
 
+.ws-menu-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
 .ws-menu-item {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex: 1;
+  min-width: 0;
   border-radius: 6px;
   padding: 5px 8px;
   cursor: pointer;
@@ -821,6 +829,10 @@ button, input, textarea, select {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  border: none;
+  padding: 0;
+  background: transparent;
+  cursor: pointer;
   border-radius: 4px;
   color: var(--muted);
 }
@@ -1188,6 +1200,7 @@ button, input, textarea, select {
   right: 4px;
   top: 50%;
   transform: translateY(-50%);
+  z-index: 1;
   opacity: 0;
 }
 
