@@ -706,7 +706,7 @@ interface ChatDoneEvent {
 }
 
 export function registerChat(app: FastifyInstance, backend?: ChatBackend): void {
-  const active = backend ?? (process.env.VULCAIN_CHAT_BACKEND === 'fake' ? new FakeChatBackend() : new PiChatBackend())
+  const active: ChatBackend = backend ?? (process.env.VULCAIN_CHAT_BACKEND === 'fake' ? new FakeChatBackend() : new PiChatBackend())
   const sessions = new Map<string, { chat: ChatSession; lastUsed: number; generation: number }>()
   let appliedProvider = JSON.stringify(loadConfig().llm?.provider ?? null)
   let modelsGeneration = 0
