@@ -4,8 +4,8 @@ import { createUIMessageStream, pipeUIMessageStreamToResponse } from 'ai'
 import fs from 'node:fs'
 import path from 'node:path'
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
-import { findWorkspace, loadConfig, type ResolvedWorkspace } from './config.js'
-import { piAgentDir } from './pisync.js'
+import { findWorkspace, loadConfig, type ResolvedWorkspace, type VulcainConfig } from './config.js'
+import { piAgentDir, syncPiModels } from './pisync.js'
 import {
   SessionIdError,
   persistCompletedTurn,
@@ -79,6 +79,8 @@ export interface ChatSession {
 export interface ChatBackend {
   createSession(cwd: string, threadId?: string, wsName?: string): Promise<ChatSession>
   listSessions?(wsName: string, cwd: string): Promise<ChatSessionInfo[]>
+  /** Drop the cached model catalog so the next session reads models.json again. */
+  refreshModels?(): void
 }
 
 const KIND_BY_TOOL: Record<string, string> = {
@@ -243,17 +245,27 @@ class PiChatSession implements ChatSession {
 export class PiChatBackend implements ChatBackend {
   private modelRuntime: ModelRuntime | null = null
   private modelRuntimePromise: Promise<ModelRuntime> | null = null
+  private runtimeEpoch = 0
+  private cachedEpoch = -1
+
+  refreshModels(): void {
+    this.runtimeEpoch += 1
+    this.modelRuntime = null
+    this.modelRuntimePromise = null
+  }
 
   private async getModelRuntime(): Promise<ModelRuntime> {
-    if (this.modelRuntime) return this.modelRuntime
-    if (this.modelRuntimePromise) return this.modelRuntimePromise
+    const epoch = this.runtimeEpoch
+    if (this.modelRuntime && this.cachedEpoch === epoch) return this.modelRuntime
+    if (this.modelRuntimePromise && this.cachedEpoch === epoch) return this.modelRuntimePromise
+    this.cachedEpoch = epoch
     const agentDir = piAgentDir()
     this.modelRuntimePromise = ModelRuntime.create({
       authPath: path.join(agentDir, 'auth.json'),
       modelsPath: path.join(agentDir, 'models.json')
     }).then(runtime => {
-      this.modelRuntime = runtime
-      this.modelRuntimePromise = null
+      if (this.runtimeEpoch === epoch) this.modelRuntime = runtime
+      if (this.cachedEpoch === epoch) this.modelRuntimePromise = null
       return runtime
     })
     return this.modelRuntimePromise
@@ -272,11 +284,12 @@ export class PiChatBackend implements ChatBackend {
         sessionManager = SessionManager.create(cwd, dir)
       }
     }
-    const { session } = await createAgentSession({
+    const { session, modelFallbackMessage } = await createAgentSession({
       cwd,
       modelRuntime,
       ...(sessionManager ? { sessionManager } : {})
     })
+    if (modelFallbackMessage) console.log(`[vulcain] ${modelFallbackMessage}`)
     return new PiChatSession(session)
   }
 }
@@ -694,7 +707,20 @@ interface ChatDoneEvent {
 
 export function registerChat(app: FastifyInstance, backend?: ChatBackend): void {
   const active = backend ?? (process.env.VULCAIN_CHAT_BACKEND === 'fake' ? new FakeChatBackend() : new PiChatBackend())
-  const sessions = new Map<string, { chat: ChatSession; lastUsed: number }>()
+  const sessions = new Map<string, { chat: ChatSession; lastUsed: number; generation: number }>()
+  let appliedProvider = JSON.stringify(loadConfig().llm?.provider ?? null)
+  let modelsGeneration = 0
+
+  const applyModelConfig = (cfg: VulcainConfig): void => {
+    const next = JSON.stringify(cfg.llm?.provider ?? null)
+    if (next === appliedProvider) return
+    appliedProvider = next
+    const synced = syncPiModels(cfg)
+    if (!synced?.changed) return
+    modelsGeneration += 1
+    active.refreshModels?.()
+    console.log(`[vulcain] synced pi models -> ${synced.file}`)
+  }
   const liveTurns = new Map<string, LiveTurn>()
   const aborting = new Set<string>()
   const eventClients = new Set<{ send: (data: string) => void; readyState: number; OPEN: number; on: (ev: string, fn: () => void) => void }>()
@@ -728,16 +754,16 @@ export function registerChat(app: FastifyInstance, backend?: ChatBackend): void 
   }
 
   async function getSession(ws: ResolvedWorkspace, threadId: string | undefined, reset: boolean): Promise<ChatSession> {
+    applyModelConfig(loadConfig())
     const key = sessionKey(ws.name, threadId)
     let entry = sessions.get(key)
-    if (entry && reset) {
-      entry.chat.dispose()
-      sessions.delete(key)
+    if (entry && (reset || (entry.generation !== modelsGeneration && !entry.chat.isStreaming))) {
+      dropSession(key)
       entry = undefined
     }
     if (!entry) {
       const chat = await active.createSession(ws.root, threadId, ws.name)
-      entry = { chat, lastUsed: Date.now() }
+      entry = { chat, lastUsed: Date.now(), generation: modelsGeneration }
       sessions.set(key, entry)
     }
     entry.lastUsed = Date.now()

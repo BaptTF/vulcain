@@ -29,7 +29,8 @@ export function syncSystemPrompt(cfg: VulcainConfig): string | undefined {
   return file
 }
 
-export function syncPiModels(cfg: VulcainConfig): string | undefined {
+/** Rewrite pi's models.json from `llm.provider`. Unchanged content is left in place. */
+export function syncPiModels(cfg: VulcainConfig): { file: string; changed: boolean } | undefined {
   const provider = cfg.llm?.provider as PiProviderConfig | undefined
   if (!provider || !provider.baseUrl || !provider.api) return undefined
 
@@ -37,6 +38,9 @@ export function syncPiModels(cfg: VulcainConfig): string | undefined {
   fs.mkdirSync(dir, { recursive: true })
 
   const file = path.join(dir, 'models.json')
-  fs.writeFileSync(file, JSON.stringify(buildPiModelsDoc(provider), null, 2) + '\n')
-  return file
+  const next = JSON.stringify(buildPiModelsDoc(provider), null, 2) + '\n'
+  const prev = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : undefined
+  if (prev === next) return { file, changed: false }
+  fs.writeFileSync(file, next)
+  return { file, changed: true }
 }

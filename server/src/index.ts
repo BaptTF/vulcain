@@ -14,8 +14,8 @@ const webDist = path.resolve(here, '../../web/dist')
 
 async function main(): Promise<void> {
   const cfg = loadConfig()
-  const modelsFile = syncPiModels(cfg)
-  if (modelsFile) console.log(`[vulcain] synced pi models -> ${modelsFile}`)
+  const models = syncPiModels(cfg)
+  if (models) console.log(`[vulcain] synced pi models -> ${models.file}`)
   const systemPromptFile = syncSystemPrompt(cfg)
   if (systemPromptFile) console.log(`[vulcain] synced system prompt -> ${systemPromptFile}`)
 
